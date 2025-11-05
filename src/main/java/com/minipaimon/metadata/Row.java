@@ -1,83 +1,90 @@
 package com.minipaimon.metadata;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Arrays;
-import java.util.Objects;
+import java.util.List;
 
 /**
- * Row 类
- * 表示一行数据
+ * 数据行
+ * 表示一行数据，包含字段值数组
  */
 public class Row {
-    /** 数据值数组，顺序与Schema中的字段顺序一致 */
+    /** 字段值数组 */
     private final Object[] values;
 
-    public Row(Object[] values) {
-        this.values = Objects.requireNonNull(values, "Values cannot be null");
-    }
-
-    public Row(int fieldCount) {
-        this.values = new Object[fieldCount];
+    /**
+     * 构造函数
+     * 
+     * @param values 字段值数组
+     */
+    @JsonCreator
+    public Row(@JsonProperty("values") Object[] values) {
+        this.values = values != null ? values.clone() : new Object[0];
     }
 
     /**
-     * 获取字段值
+     * 获取字段值数组
+     * 
+     * @return 字段值数组的副本
+     */
+    public Object[] getValues() {
+        return values != null ? values.clone() : new Object[0];
+    }
+
+    /**
+     * 获取指定索引的字段值
+     * 
+     * @param index 字段索引
+     * @return 字段值
      */
     public Object getValue(int index) {
-        if (index < 0 || index >= values.length) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + values.length);
+        if (values == null || index < 0 || index >= values.length) {
+            return null;
         }
         return values[index];
     }
 
     /**
-     * 设置字段值
-     */
-    public void setValue(int index, Object value) {
-        if (index < 0 || index >= values.length) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + values.length);
-        }
-        values[index] = value;
-    }
-
-    /**
      * 获取字段数量
+     * 
+     * @return 字段数量
      */
     public int getFieldCount() {
-        return values.length;
+        return values != null ? values.length : 0;
     }
 
     /**
-     * 获取所有值
-     */
-    public Object[] getValues() {
-        return Arrays.copyOf(values, values.length);
-    }
-
-    /**
-     * 检查指定位置的值是否为null
-     */
-    public boolean isNull(int index) {
-        return getValue(index) == null;
-    }
-
-    /**
-     * 根据Schema验证Row的有效性
+     * 验证行数据与Schema的兼容性
+     * 
+     * @param schema Schema定义
+     * @throws IllegalArgumentException 如果数据不兼容
      */
     public void validate(Schema schema) {
-        if (values.length != schema.getFields().size()) {
+        List<Field> fields = schema.getFields();
+        
+        // 检查字段数量
+        if (values == null) {
+            if (!fields.isEmpty()) {
+                throw new IllegalArgumentException("Row has no values but schema has " + fields.size() + " fields");
+            }
+            return;
+        }
+        
+        if (values.length != fields.size()) {
             throw new IllegalArgumentException(
-                    "Row field count (" + values.length + 
-                    ") does not match schema (" + schema.getFields().size() + ")");
+                    "Row field count mismatch. Expected: " + fields.size() + ", Actual: " + values.length);
         }
 
-        for (int i = 0; i < values.length; i++) {
-            Field field = schema.getFields().get(i);
+        // 检查每个字段的类型兼容性
+        for (int i = 0; i < fields.size(); i++) {
+            Field field = fields.get(i);
             Object value = values[i];
 
             // 检查非空约束
-            if (value == null && !field.isNullable()) {
-                throw new IllegalArgumentException(
-                        "Field '" + field.getName() + "' cannot be null");
+            if (!field.isNullable() && value == null) {
+                throw new IllegalArgumentException("Field '" + field.getName() + "' cannot be null");
             }
 
             // 检查类型匹配
@@ -102,6 +109,8 @@ public class Row {
                 return value instanceof String;
             case BOOLEAN:
                 return value instanceof Boolean;
+            case DOUBLE:
+                return value instanceof Double;
             default:
                 return false;
         }

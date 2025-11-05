@@ -18,7 +18,10 @@ public enum DataType {
     STRING(-1),
     
     /** 布尔类型 */
-    BOOLEAN(1);
+    BOOLEAN(1),
+    
+    /** 双精度浮点数 */
+    DOUBLE(8);
 
     /** 固定长度类型的字节数，-1表示变长 */
     private final int fixedSize;
