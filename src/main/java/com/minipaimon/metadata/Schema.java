@@ -1,5 +1,8 @@
 package com.minipaimon.metadata;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,7 +30,12 @@ public class Schema {
         this(schemaId, fields, primaryKeys, Collections.emptyList());
     }
 
-    public Schema(int schemaId, List<Field> fields, List<String> primaryKeys, List<String> partitionKeys) {
+    @JsonCreator
+    public Schema(
+            @JsonProperty("schemaId") int schemaId,
+            @JsonProperty("fields") List<Field> fields,
+            @JsonProperty("primaryKeys") List<String> primaryKeys,
+            @JsonProperty("partitionKeys") List<String> partitionKeys) {
         this.schemaId = schemaId;
         this.fields = new ArrayList<>(Objects.requireNonNull(fields, "Fields cannot be null"));
         this.primaryKeys = new ArrayList<>(Objects.requireNonNull(primaryKeys, "Primary keys cannot be null"));

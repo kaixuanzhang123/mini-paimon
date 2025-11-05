@@ -390,31 +390,200 @@ LRU 策略
 ●  在写入时每个 DataBlock 记录一个索引项
 ●  加载时将索引加载到内存
 ●  实现二分查找定位算法
+任务 3.3：数据块索引实现
+1. **实现 Compaction 机制**: 多层 SSTable 合并
+2. **WAL（Write-Ahead Log）支持**: 提供数据持久性保证
+3. **并发控制优化**: 改进读写并发性能
+4. **缓存机制**: 添加 Block Cache 提升读取性能
+5. **压缩算法**: 支持数据压缩减少存储空间
+
 阶段四：元数据管理
-任务 4.1：Table Schema 管理
-目标：持久化表结构
-Schema 文件格式 (JSON):
-json
+# Paimon 元数据管理实现方案
+
+## 概述
+
+元数据管理是 Paimon 的核心组件之一，负责管理表的结构定义、版本演化和持久化。本方案主要实现 Schema 管理和 Table 元数据管理两大模块。
+
+## 任务 1：Table Schema 管理
+
+### 1.1 Schema 数据结构设计
+
+#### Schema 类
+
+核心字段：
+- schemaId: long - Schema 版本号，从 0 开始递增
+- fields: List<Field> - 字段列表
+- primaryKeys: List<String> - 主键字段名列表
+- partitionKeys: List<String> - 分区键字段名列表
+- options: Map<String, String> - 表级别配置选项
+- comment: String - 表注释（可选）
+- timeMillis: long - Schema 创建时间戳
+
+#### Field 类
+
+核心字段：
+- id: int - 字段唯一标识符，用于 Schema 演化
+- name: String - 字段名称
+- type: DataType - 字段数据类型
+- nullable: boolean - 是否允许为空
+- description: String - 字段描述（可选）
+- defaultValue: Object - 默认值（可选）
+
+#### DataType 枚举/类
+
+支持的基本类型：
+- INT (4字节整数)
+- BIGINT (8字节长整数)
+- FLOAT (4字节浮点数)
+- DOUBLE (8字节双精度浮点数)
+- STRING (变长字符串)
+- BOOLEAN (布尔值)
+
+### 1.2 SchemaManager 类实现
+
+#### 核心职责
+- Schema 的序列化和反序列化
+- Schema 版本管理
+- Schema 读取和缓存
+- Schema 演化验证
+
+#### 主要方法
+
+##### createSchema
+功能：创建新的 Schema
+输入：TableSchema, tablePath
+流程：
+1. 分配新的 schemaId（读取当前最大 ID + 1）
+2. 验证 Schema 合法性（主键存在性、字段名唯一性等）
+3. 序列化为 JSON
+4. 写入文件 `{tablePath}/schema/schema-{schemaId}`
+5. 更新Schema ID
+输出：schemaId
+
+##### commitSchema
+功能：提交 Schema 演化
+输入：newSchema, oldSchemaId, tablePath
+流程：
+1. 读取旧 Schema
+2. 验证 Schema 演化兼容性
+3. 分配新 schemaId
+4. 持久化新 Schema
 
 
-{
-  "schemaId": 0,
-  "fields": [
-    {"name": "id", "type": "INT", "nullable": false},
-    {"name": "name", "type": "STRING", "nullable": true}
-  ],
-  "primaryKeys": ["id"],
-  "partitionKeys": []
-}
-●  实现 SchemaManager 类
-●  Schema 序列化为 JSON 文件：schema/schema-{id}
-●  Schema 版本管理（支持演化）
-●  实现 Schema 读取和缓存
-任务 4.2：Table 元数据
-目标：管理表级别信息
-●  实现 TableMetadata 类
-●  存储表名、Schema ID、创建时间等
-●  文件路径：{tableName}/metadata
+##### getSchema
+功能：根据 ID 获取 Schema
+输入：schemaId, tablePath
+流程：
+1. 检查内存缓存
+2. 如果缓存未命中，从文件读取
+3. 反序列化 JSON
+4. 更新缓存
+5. 返回 Schema 对象
+
+
+##### listSchemas
+功能：列出所有历史 Schema 版本
+输入：tablePath
+输出：List<Long> - 所有 schemaId 列表
+
+### 1.3 Schema 文件结构
+
+#### 目录布局
+```
+{tablePath}/
+├── schema/
+│   ├── schema-0          # 初始 Schema
+│   ├── schema-1          # 第一次演化后的 Schema
+│   ├── schema-2          # 第二次演化后的 Schema
+│  
+```
+
+### 1.4 Schema 演化管理
+
+#### 演化规则
+
+允许的演化操作：
+- 添加新字段（必须是 nullable 或有默认值）
+- 修改字段注释
+- 修改表注释
+- 添加表选项
+
+禁止的演化操作：
+- 删除字段
+- 修改字段类型
+- 修改字段 ID
+- 修改主键定义
+- 修改分区键定义
+- 将 nullable 字段改为 non-nullable
+
+#### 演化验证逻辑
+`validateSchemaEvolution(oldSchema, newSchema)`:
+1. 检查主键是否变化
+2. 检查分区键是否变化
+3. 遍历旧 Schema 的字段：
+   - 验证字段是否存在于新 Schema
+   - 验证字段 ID 未改变
+   - 验证字段类型未改变
+   - 验证 nullable 属性未变严格
+4. 遍历新增字段：
+   - 验证必须是 nullable 或有默认值
+   - 分配新的 field ID（使用最大 ID + 1）
+5. 所有检查通过才允许提交
+
+#### Field ID 管理
+
+字段 ID 的作用：
+- 在 Schema 演化时保持字段的稳定标识
+- 即使字段重命名，Field ID 保持不变
+- 用于数据文件的列映射
+
+分配策略：
+- 初始 Schema：按字段顺序从 0 开始
+- Schema 演化：新字段 ID = max(existing field IDs) + 1
+- 删除字段后 ID 不复用（避免混淆）
+
+## 任务 2：Table 元数据管理
+
+### 2.2 SchemaManager 类实现
+
+#### 主要方法
+
+##### createTable
+功能：创建新表的元数据
+输入：Schema schema
+流程：
+1. 生成 tableUUID
+2. 设置创建时间和修改时间
+3. 初始化 snapshotId 为 -1
+4. 序列化为 JSON
+5. 写入 `{tablePath}/metadata` 文件
+6. 返回 TableSchema 对象
+
+##### updateTable
+功能：更新表元数据（Schema）
+输入：updated Schema
+流程：
+1. 对比旧 Schema，校验schema是否合法
+2. 更新相关字段（schemaId等）
+3. 原子性写入新文件（写临时文件 + rename）
+
+### 2.4 元数据持久化策略
+
+#### 原子性写入
+
+实现方式：
+1. 创建临时文件：`{tablePath}/metadata.tmp.{timestamp}`
+2. 写入完整的 JSON 内容
+3. 调用 fsync 确保刷盘
+4. 原子重命名：`metadata.tmp.{timestamp}` -> `metadata`
+5. 删除旧的临时文件（如果存在）
+
+优点：
+- 保证元数据文件的完整性
+- 避免写入过程中的文件损坏
+- 支持并发安全
+
+
 阶段五：Snapshot 机制
 任务 5.1：Snapshot 设计
 目标：实现版本控制
@@ -437,6 +606,7 @@ manifest-1     manifest-2     manifest-3
 ●  文件命名：snapshot/snapshot-{id}
 ●  维护 LATEST 指针（软链接或标记文件）
 ●  实现快照的创建和读取
+
 任务 5.2：Manifest 文件
 目标：追踪数据文件变更
 Manifest List 格式：
@@ -470,6 +640,7 @@ json
 ●  实现 ManifestList 类
 ●  写入时增量记录文件变更
 ●  读取时合并所有 Manifest 得到当前文件列表
+
 任务 5.3：快照读取流程
 目标：实现时间旅行查询
 Read Flow:
@@ -480,6 +651,22 @@ Query ──▶ Load Latest Snapshot ──▶ Read Manifest ──▶ Get File 
 ●  根据 Snapshot ID 加载对应版本
 ●  解析 Manifest 获取所有活跃文件
 ●  合并多个 SSTable 的查询结果（按 Key 去重，取最新）
+
+阶段五：Snapshot 机制（已完成）
+目标：实现版本控制和数据文件管理
+●  实现 Snapshot 类：表示表在某个时间点的状态
+●  实现 SnapshotManager 类：负责快照的创建、管理和查询
+●  实现 ManifestEntry 类：记录数据文件的变更（添加/删除）
+●  实现 ManifestFile 类：包含一组 Manifest 条目
+●  实现 ManifestList 类：记录一组 Manifest 文件的路径
+●  文件命名规范：
+   - 快照文件：snapshot/snapshot-{id}
+   - Manifest List 文件：manifest/manifest-list-{snapshotId}
+   - Manifest 文件：manifest/manifest-{uuid}
+●  维护 LATEST 指针：指向最新快照
+●  实现快照的创建和读取
+●  实现时间旅行查询：根据快照 ID 加载对应版本的数据
+
 阶段六：文件组织结构
 任务 6.1：目录结构设计
 目标：参考 Paimon 的目录布局
@@ -504,3 +691,10 @@ warehouse/
 ●  实现 PathFactory 工具类
 ●  自动创建目录结构
 ●  实现文件清理（旧快照的垃圾回收）
+
+阶段六：LSM Tree 与 Snapshot 集成
+目标：将 LSM Tree 存储引擎与 Snapshot 机制集成
+●  修改 LSMTree 类，在数据刷写时创建快照
+●  实现数据文件变更的自动记录到 Manifest
+●  验证快照机制的完整性和正确性
+●  提供时间旅行查询能力

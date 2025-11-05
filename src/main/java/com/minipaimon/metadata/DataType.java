@@ -4,6 +4,9 @@ package com.minipaimon.metadata;
  * 数据类型枚举
  * 支持的基本数据类型
  */
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
 public enum DataType {
     /** 32位整数 */
     INT(4),

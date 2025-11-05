@@ -1,13 +1,18 @@
 package com.minipaimon.storage;
 
+import com.minipaimon.manifest.ManifestEntry;
 import com.minipaimon.metadata.Row;
 import com.minipaimon.metadata.RowKey;
 import com.minipaimon.metadata.Schema;
+import com.minipaimon.snapshot.Snapshot;
+import com.minipaimon.snapshot.SnapshotManager;
 import com.minipaimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -43,6 +48,9 @@ public class LSMTree {
     
     /** SSTable 写入器 */
     private final SSTableWriter sstWriter;
+    
+    /** 快照管理器 */
+    private final SnapshotManager snapshotManager;
 
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) {
         this.schema = schema;
@@ -52,6 +60,7 @@ public class LSMTree {
         this.sequenceGenerator = new AtomicLong(0);
         this.sstReader = new SSTableReader();
         this.sstWriter = new SSTableWriter();
+        this.snapshotManager = new SnapshotManager(pathFactory, database, table);
         
         // 初始化活跃内存表
         this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
@@ -130,9 +139,24 @@ public class LSMTree {
         String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
         
         // 刷写到磁盘
-        sstWriter.flush(immutableMemTable, sstPath);
+        SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
         
         logger.info("Flushed memtable to SSTable: {}", sstPath);
+        
+        // 创建 Manifest 条目
+        List<ManifestEntry> manifestEntries = new ArrayList<>();
+        ManifestEntry entry = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            sstPath,
+            0, // level
+            footer.getMinKey(),
+            footer.getMaxKey(),
+            footer.getRowCount()
+        );
+        manifestEntries.add(entry);
+        
+        // 创建快照
+        snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
         
         // 清理不可变内存表
         immutableMemTable = null;
@@ -163,13 +187,43 @@ public class LSMTree {
         // 刷写活跃内存表
         if (!activeMemTable.isEmpty()) {
             String sstPath = pathFactory.getSSTPath(database, table, 0, activeMemTable.getSequenceNumber()).toString();
-            sstWriter.flush(activeMemTable, sstPath);
+            SSTable.Footer footer = sstWriter.flush(activeMemTable, sstPath);
+            
+            // 创建 Manifest 条目
+            List<ManifestEntry> manifestEntries = new ArrayList<>();
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                sstPath,
+                0, // level
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                footer.getRowCount()
+            );
+            manifestEntries.add(entry);
+            
+            // 创建快照
+            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
         }
         
         // 刷写不可变内存表
         if (immutableMemTable != null && !immutableMemTable.isEmpty()) {
             String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
-            sstWriter.flush(immutableMemTable, sstPath);
+            SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
+            
+            // 创建 Manifest 条目
+            List<ManifestEntry> manifestEntries = new ArrayList<>();
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                sstPath,
+                0, // level
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                footer.getRowCount()
+            );
+            manifestEntries.add(entry);
+            
+            // 创建快照
+            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
         }
         
         logger.info("LSMTree closed successfully");

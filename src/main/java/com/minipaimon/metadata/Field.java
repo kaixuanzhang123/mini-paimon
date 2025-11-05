@@ -1,5 +1,8 @@
 package com.minipaimon.metadata;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Objects;
 
 /**
@@ -16,7 +19,11 @@ public class Field {
     /** 是否可为空 */
     private final boolean nullable;
 
-    public Field(String name, DataType type, boolean nullable) {
+    @JsonCreator
+    public Field(
+            @JsonProperty("name") String name,
+            @JsonProperty("type") DataType type,
+            @JsonProperty("nullable") boolean nullable) {
         this.name = Objects.requireNonNull(name, "Field name cannot be null");
         this.type = Objects.requireNonNull(type, "Field type cannot be null");
         this.nullable = nullable;

@@ -1,5 +1,9 @@
 package com.minipaimon.metadata;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -12,9 +16,15 @@ import java.util.Objects;
  */
 public class RowKey implements Comparable<RowKey> {
     /** 序列化后的主键字节数组 */
-    private final byte[] keyBytes;
+    private byte[] keyBytes;
+    
+    /** 无参构造函数，仅供 Jackson 反序列化使用 */
+    public RowKey() {
+        this.keyBytes = new byte[0]; // 仅供 Jackson 使用
+    }
 
-    public RowKey(byte[] keyBytes) {
+    @JsonCreator
+    public RowKey(@JsonProperty("keyBytes") byte[] keyBytes) {
         this.keyBytes = Objects.requireNonNull(keyBytes, "Key bytes cannot be null");
     }
 
@@ -99,8 +109,28 @@ public class RowKey implements Comparable<RowKey> {
         }
     }
 
+    @JsonIgnore
     public byte[] getBytes() {
         return Arrays.copyOf(keyBytes, keyBytes.length);
+    }
+    
+    /**
+     * 获取键字节，供 Jackson 序列化使用
+     * @return 键字节
+     */
+    @JsonProperty("keyBytes")
+    public byte[] getKeyBytes() {
+        return keyBytes;
+    }
+    
+    /**
+     * 设置键字节，仅供 Jackson 反序列化使用
+     * @param keyBytes 键字节
+     */
+    public void setKeyBytes(byte[] keyBytes) {
+        if (this.keyBytes == null || this.keyBytes.length == 0) {
+            this.keyBytes = keyBytes;
+        }
     }
 
     public int size() {
@@ -136,6 +166,6 @@ public class RowKey implements Comparable<RowKey> {
 
     @Override
     public String toString() {
-        return "RowKey{" + "bytes=" + Arrays.toString(keyBytes) + '}';
+        return "RowKey{keyBytes=" + Arrays.toString(keyBytes) + '}';
     }
 }
