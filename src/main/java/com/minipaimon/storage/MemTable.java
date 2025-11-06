@@ -83,6 +83,15 @@ public class MemTable {
     }
 
     /**
+     * 获取内存表中的所有数据
+     * 
+     * @return 包含所有数据行的Map
+     */
+    public Map<RowKey, Row> getAllData() {
+        return Maps.newHashMap(memTable);
+    }
+
+    /**
      * 计算行的大小（近似值）
      */
     private int calculateRowSize(Row row, RowKey key) {

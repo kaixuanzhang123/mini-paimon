@@ -1,6 +1,7 @@
 package com.minipaimon.metadata;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Arrays;
@@ -51,6 +52,7 @@ public class Row {
      * 
      * @return 字段数量
      */
+    @JsonIgnore
     public int getFieldCount() {
         return values != null ? values.length : 0;
     }

@@ -1,21 +1,28 @@
 package com.minipaimon.sql;
 
+import com.alibaba.druid.sql.ast.SQLDataType;
+import com.alibaba.druid.sql.ast.SQLExpr;
+import com.alibaba.druid.sql.ast.SQLStatement;
+import com.alibaba.druid.sql.ast.expr.*;
+import com.alibaba.druid.sql.ast.statement.*;
+import com.alibaba.druid.sql.parser.SQLParserUtils;
+import com.alibaba.druid.sql.parser.SQLStatementParser;
+import com.alibaba.druid.util.JdbcConstants;
 import com.minipaimon.metadata.DataType;
 import com.minipaimon.metadata.Field;
 import com.minipaimon.metadata.Schema;
-import com.minipaimon.metadata.TableManager;
 import com.minipaimon.storage.LSMTree;
 import com.minipaimon.utils.PathFactory;
+import com.minipaimon.metadata.TableManager;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * SQL 解析器
- * 支持 CREATE TABLE 和 INSERT 语句的解析
+ * 支持 CREATE TABLE、INSERT 和 SELECT 语句的解析
+ * 使用 Druid SQL Parser 实现标准 SQL 解析
  */
 public class SQLParser {
     
@@ -34,118 +41,71 @@ public class SQLParser {
      * @throws IOException 解析或执行错误
      */
     public void executeSQL(String sql) throws IOException {
-        String trimmedSql = sql.trim();
-        if (trimmedSql.toUpperCase().startsWith("CREATE TABLE")) {
-            executeCreateTable(trimmedSql);
-        } else if (trimmedSql.toUpperCase().startsWith("INSERT INTO")) {
-            executeInsert(trimmedSql);
+        SQLStatementParser parser = SQLParserUtils.createSQLStatementParser(sql, JdbcConstants.MYSQL);
+        List<SQLStatement> statements = parser.parseStatementList();
+        
+        if (statements.isEmpty()) {
+            throw new IllegalArgumentException("Empty SQL statement");
+        }
+        
+        SQLStatement statement = statements.get(0);
+        
+        if (statement instanceof SQLCreateTableStatement) {
+            executeCreateTable((SQLCreateTableStatement) statement);
+        } else if (statement instanceof SQLInsertStatement) {
+            executeInsert((SQLInsertStatement) statement);
+        } else if (statement instanceof SQLSelectStatement) {
+            executeSelect((SQLSelectStatement) statement);
         } else {
-            throw new IllegalArgumentException("Unsupported SQL statement: " + trimmedSql);
+            throw new IllegalArgumentException("Unsupported SQL statement: " + statement.getClass().getSimpleName());
         }
     }
     
     /**
      * 解析并执行 CREATE TABLE 语句
      * 
-     * @param sql CREATE TABLE 语句
+     * @param stmt CREATE TABLE 语句
      * @throws IOException 解析或执行错误
      */
-    private void executeCreateTable(String sql) throws IOException {
-        // 简化的 CREATE TABLE 语法解析
-        // CREATE TABLE table_name (column1 type1 PRIMARY KEY, column2 type2, ...)
+    private void executeCreateTable(SQLCreateTableStatement stmt) throws IOException {
+        String tableName = stmt.getTableSource().toString();
         
-        // 提取表名
-        Pattern tableNamePattern = Pattern.compile("CREATE\\s+TABLE\\s+(\\w+)", Pattern.CASE_INSENSITIVE);
-        Matcher tableNameMatcher = tableNamePattern.matcher(sql);
-        if (!tableNameMatcher.find()) {
-            throw new IllegalArgumentException("Invalid CREATE TABLE syntax: " + sql);
-        }
-        String tableName = tableNameMatcher.group(1);
-        
-        // 提取列定义部分
-        int startParen = sql.indexOf('(');
-        int endParen = sql.lastIndexOf(')');
-        if (startParen == -1 || endParen == -1 || endParen <= startParen) {
-            throw new IllegalArgumentException("Invalid CREATE TABLE syntax: " + sql);
-        }
-        
-        String columnsDef = sql.substring(startParen + 1, endParen);
-        
-        // 解析列定义
         List<Field> fields = new ArrayList<>();
         List<String> primaryKeys = new ArrayList<>();
         
-        String[] columnDefs = columnsDef.split(",");
-        for (String columnDef : columnDefs) {
-            columnDef = columnDef.trim();
-            if (columnDef.isEmpty()) continue;
-            
-            // 解析列定义
-            String[] parts = columnDef.split("\\s+");
-            if (parts.length < 2) {
-                throw new IllegalArgumentException("Invalid column definition: " + columnDef);
-            }
-            
-            String columnName = parts[0];
-            String columnType = parts[1].toUpperCase();
-            
-            // 检查是否为主键
-            boolean isPrimaryKey = false;
-            for (int i = 2; i < parts.length; i++) {
-                if ("PRIMARY".equalsIgnoreCase(parts[i]) && i + 1 < parts.length && 
-                    "KEY".equalsIgnoreCase(parts[i + 1])) {
-                    isPrimaryKey = true;
-                    break;
+        // 解析列定义
+        for (SQLTableElement element : stmt.getTableElementList()) {
+            if (element instanceof SQLColumnDefinition) {
+                SQLColumnDefinition columnDef = (SQLColumnDefinition) element;
+                String columnName = columnDef.getName().getSimpleName();
+                
+                // 获取数据类型
+                SQLDataType sqlDataType = columnDef.getDataType();
+                DataType dataType = convertDataType(sqlDataType);
+                
+                // 检查是否为可空字段
+                boolean nullable = true;
+                for (SQLColumnConstraint constraint : columnDef.getConstraints()) {
+                    if (constraint instanceof SQLNotNullConstraint) {
+                        nullable = false;
+                        break;
+                    }
                 }
+                
+                fields.add(new Field(columnName, dataType, nullable));
             }
-            
-            // 跳过 PRIMARY KEY 关键字本身
-            if ("PRIMARY".equalsIgnoreCase(columnName)) {
-                continue;
-            }
-            
-            DataType dataType;
-            switch (columnType) {
-                case "INT":
-                    dataType = DataType.INT;
-                    break;
-                case "BIGINT":
-                case "LONG":
-                    dataType = DataType.LONG;
-                    break;
-                case "STRING":
-                case "VARCHAR":
-                case "TEXT":
-                    dataType = DataType.STRING;
-                    break;
-                case "BOOLEAN":
-                case "BOOL":
-                    dataType = DataType.BOOLEAN;
-                    break;
-                case "DOUBLE":
-                case "FLOAT":
-                    dataType = DataType.DOUBLE;
-                    break;
-                default:
-                    // 跳过不支持的类型
-                    continue;
-            }
-            
-            // 检查是否为可空字段（简化处理）
-            boolean nullable = true;
-            for (int i = 2; i < parts.length; i++) {
-                if ("NOT".equalsIgnoreCase(parts[i]) && i + 1 < parts.length && 
-                    "NULL".equalsIgnoreCase(parts[i + 1])) {
-                    nullable = false;
-                    break;
+        }
+        
+        // 检查是否有在列定义中指定的主键约束（向后兼容）
+        for (SQLTableElement element : stmt.getTableElementList()) {
+            if (element instanceof SQLColumnDefinition) {
+                SQLColumnDefinition columnDef = (SQLColumnDefinition) element;
+                for (SQLColumnConstraint constraint : columnDef.getConstraints()) {
+                    if ("PRIMARY KEY".equalsIgnoreCase(constraint.getClass().getSimpleName())) {
+                        primaryKeys.add(columnDef.getName().getSimpleName());
+                        break;
+                    }
                 }
-            }
-            
-            fields.add(new Field(columnName, dataType, nullable));
-            
-            // 如果是主键，添加到主键列表
-            if (isPrimaryKey) {
-                primaryKeys.add(columnName);
             }
         }
         
@@ -160,8 +120,7 @@ public class SQLParser {
         }
         
         // 创建表
-        Schema schema = new Schema(0, fields, primaryKeys);
-        tableManager.createTable("default", tableName, schema.getFields(), schema.getPrimaryKeys(), new ArrayList<>());
+        tableManager.createTable("default", tableName, fields, primaryKeys, new ArrayList<>());
         
         System.out.println("Table '" + tableName + "' created successfully.");
     }
@@ -169,44 +128,11 @@ public class SQLParser {
     /**
      * 解析并执行 INSERT 语句
      * 
-     * @param sql INSERT 语句
+     * @param stmt INSERT 语句
      * @throws IOException 解析或执行错误
      */
-    private void executeInsert(String sql) throws IOException {
-        // 简化的 INSERT 语法解析
-        // INSERT INTO table_name VALUES (value1, value2, ...)
-        // INSERT INTO table_name (col1, col2, ...) VALUES (value1, value2, ...)
-        
-        Pattern pattern1 = Pattern.compile(
-            "INSERT\\s+INTO\\s+(\\w+)\\s+VALUES\\s*\\((.+)\\)",
-            Pattern.CASE_INSENSITIVE
-        );
-        
-        Pattern pattern2 = Pattern.compile(
-            "INSERT\\s+INTO\\s+(\\w+)\\s*\\((.+)\\)\\s+VALUES\\s*\\((.+)\\)",
-            Pattern.CASE_INSENSITIVE
-        );
-        
-        Matcher matcher1 = pattern1.matcher(sql);
-        Matcher matcher2 = pattern2.matcher(sql);
-        
-        String tableName;
-        List<String> columnNames;
-        List<String> values;
-        
-        if (matcher1.matches()) {
-            // INSERT INTO table_name VALUES (value1, value2, ...)
-            tableName = matcher1.group(1);
-            columnNames = null; // 使用所有列
-            values = parseValues(matcher1.group(2));
-        } else if (matcher2.matches()) {
-            // INSERT INTO table_name (col1, col2, ...) VALUES (value1, value2, ...)
-            tableName = matcher2.group(1);
-            columnNames = parseColumnNames(matcher2.group(2));
-            values = parseValues(matcher2.group(3));
-        } else {
-            throw new IllegalArgumentException("Invalid INSERT syntax: " + sql);
-        }
+    private void executeInsert(SQLInsertStatement stmt) throws IOException {
+        String tableName = stmt.getTableName().getSimpleName();
         
         // 获取表的 Schema
         Schema schema = tableManager.getSchemaManager("default", tableName)
@@ -216,41 +142,55 @@ public class SQLParser {
             throw new IOException("Table '" + tableName + "' not found");
         }
         
-        // 验证列数和值数是否匹配
         List<Field> fields = schema.getFields();
-        if (columnNames == null) {
+        
+        // 处理列名（如果指定了）
+        List<String> columnNames = new ArrayList<>();
+        if (stmt.getColumns().isEmpty()) {
             // 使用所有列
-            if (values.size() != fields.size()) {
-                throw new IllegalArgumentException(
-                    "Value count doesn't match column count. Expected: " + fields.size() + ", Actual: " + values.size());
+            for (Field field : fields) {
+                columnNames.add(field.getName());
             }
         } else {
             // 使用指定列
-            if (values.size() != columnNames.size()) {
-                throw new IllegalArgumentException(
-                    "Value count doesn't match column count. Expected: " + columnNames.size() + ", Actual: " + values.size());
+            for (SQLExpr columnExpr : stmt.getColumns()) {
+                if (columnExpr instanceof SQLIdentifierExpr) {
+                    columnNames.add(((SQLIdentifierExpr) columnExpr).getName());
+                } else {
+                    throw new IllegalArgumentException("Unsupported column expression: " + columnExpr);
+                }
             }
+        }
+        
+        // 处理值
+        List<SQLInsertStatement.ValuesClause> valuesList = stmt.getValuesList();
+        if (valuesList.isEmpty()) {
+            throw new IllegalArgumentException("No values specified in INSERT statement");
+        }
+        
+        // 只处理第一行数据（简化处理）
+        SQLInsertStatement.ValuesClause valuesClause = valuesList.get(0);
+        List<SQLExpr> valueExprs = valuesClause.getValues();
+        
+        // 验证列数和值数是否匹配
+        if (valueExprs.size() != columnNames.size()) {
+            throw new IllegalArgumentException(
+                "Value count doesn't match column count. Expected: " + columnNames.size() + ", Actual: " + valueExprs.size());
         }
         
         // 构造数据行
         Object[] rowValues = new Object[fields.size()];
         
-        if (columnNames == null) {
-            // 按顺序填充所有列
-            for (int i = 0; i < fields.size(); i++) {
-                rowValues[i] = convertValue(values.get(i), fields.get(i).getType());
-            }
-        } else {
-            // 按指定列名填充
-            for (int i = 0; i < fields.size(); i++) {
-                Field field = fields.get(i);
-                int columnIndex = columnNames.indexOf(field.getName());
-                if (columnIndex >= 0) {
-                    rowValues[i] = convertValue(values.get(columnIndex), field.getType());
-                } else {
-                    // 未指定的列使用默认值或 null
-                    rowValues[i] = null;
-                }
+        // 按指定列名填充
+        for (int i = 0; i < fields.size(); i++) {
+            Field field = fields.get(i);
+            int columnIndex = columnNames.indexOf(field.getName());
+            if (columnIndex >= 0) {
+                SQLExpr valueExpr = valueExprs.get(columnIndex);
+                rowValues[i] = convertValue(valueExpr, field.getType());
+            } else {
+                // 未指定的列使用默认值或 null
+                rowValues[i] = null;
             }
         }
         
@@ -264,39 +204,144 @@ public class SQLParser {
     }
     
     /**
-     * 解析列名列表
+     * 解析并执行 SELECT 语句
+     * 
+     * @param stmt SELECT 语句
+     * @throws IOException 解析或执行错误
      */
-    private List<String> parseColumnNames(String columnNamesStr) {
-        List<String> columnNames = new ArrayList<>();
-        String[] names = columnNamesStr.split(",");
-        for (String name : names) {
-            columnNames.add(name.trim());
+    private void executeSelect(SQLSelectStatement stmt) throws IOException {
+        SQLSelectQuery query = stmt.getSelect().getQuery();
+        
+        if (!(query instanceof SQLSelectQueryBlock)) {
+            throw new IllegalArgumentException("Only simple SELECT queries are supported");
         }
-        return columnNames;
+        
+        SQLSelectQueryBlock queryBlock = (SQLSelectQueryBlock) query;
+        
+        // 检查是否是简单的SELECT *查询
+        if (queryBlock.getSelectList().size() != 1) {
+            throw new IllegalArgumentException("Only SELECT * is supported");
+        }
+        
+        SQLSelectItem selectItem = queryBlock.getSelectList().get(0);
+        if (!(selectItem.getExpr() instanceof SQLAllColumnExpr)) {
+            throw new IllegalArgumentException("Only SELECT * is supported");
+        }
+        
+        // 获取表名
+        if (!(queryBlock.getFrom() instanceof SQLExprTableSource)) {
+            throw new IllegalArgumentException("Only single table SELECT is supported");
+        }
+        
+        SQLExprTableSource tableSource = (SQLExprTableSource) queryBlock.getFrom();
+        String tableName = tableSource.getExpr().toString();
+        
+        // 获取表的 Schema
+        Schema schema = tableManager.getSchemaManager("default", tableName)
+                                   .getCurrentSchema();
+        
+        if (schema == null) {
+            throw new IOException("Table '" + tableName + "' not found");
+        }
+        
+        // 从LSMTree中读取数据
+        LSMTree lsmTree = new LSMTree(schema, pathFactory, "default", tableName);
+        List<com.minipaimon.metadata.Row> rows = lsmTree.scan(); // 获取所有数据
+        lsmTree.close();
+        
+        // 打印结果
+        printResults(schema, rows);
     }
     
     /**
-     * 解析值列表
+     * 打印查询结果
+     * 
+     * @param schema 表的Schema
+     * @param rows 查询到的数据行
      */
-    private List<String> parseValues(String valuesStr) {
-        List<String> values = new ArrayList<>();
-        // 简化处理，按逗号分割（不处理字符串中的逗号）
-        String[] valueArray = valuesStr.split(",");
-        for (String value : valueArray) {
-            values.add(value.trim());
+    private void printResults(Schema schema, List<com.minipaimon.metadata.Row> rows) {
+        // 打印列标题
+        List<Field> fields = schema.getFields();
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) System.out.print("\t");
+            System.out.print(fields.get(i).getName());
         }
-        return values;
+        System.out.println();
+        
+        // 打印分隔线
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) System.out.print("\t");
+            System.out.print("--------");
+        }
+        System.out.println();
+        
+        // 打印数据行
+        for (com.minipaimon.metadata.Row row : rows) {
+            Object[] values = row.getValues();
+            for (int i = 0; i < values.length; i++) {
+                if (i > 0) System.out.print("\t");
+                System.out.print(values[i] != null ? values[i].toString() : "NULL");
+            }
+            System.out.println();
+        }
+        
+        System.out.println(rows.size() + " row(s) returned");
     }
     
     /**
-     * 转换字符串值为指定类型
+     * 转换 SQL 数据类型为内部数据类型
      */
-    private Object convertValue(String valueStr, DataType dataType) {
-        // 移除可能的引号
-        if (valueStr.startsWith("'") && valueStr.endsWith("'")) {
-            valueStr = valueStr.substring(1, valueStr.length() - 1);
-        } else if (valueStr.startsWith("\"") && valueStr.endsWith("\"")) {
-            valueStr = valueStr.substring(1, valueStr.length() - 1);
+    private DataType convertDataType(SQLDataType sqlDataType) {
+        String typeName = sqlDataType.getName().toUpperCase();
+        
+        switch (typeName) {
+            case "INT":
+            case "INTEGER":
+                return DataType.INT;
+            case "BIGINT":
+            case "LONG":
+                return DataType.LONG;
+            case "VARCHAR":
+            case "CHAR":
+            case "TEXT":
+            case "STRING":
+                return DataType.STRING;
+            case "BOOLEAN":
+            case "BOOL":
+                return DataType.BOOLEAN;
+            case "DOUBLE":
+            case "FLOAT":
+                return DataType.DOUBLE;
+            default:
+                throw new IllegalArgumentException("Unsupported data type: " + typeName);
+        }
+    }
+    
+    /**
+     * 转换 SQL 表达式值为指定类型
+     */
+    private Object convertValue(SQLExpr valueExpr, DataType dataType) {
+        if (valueExpr instanceof SQLNullExpr) {
+            return null;
+        }
+        
+        String valueStr;
+        if (valueExpr instanceof SQLCharExpr) {
+            valueStr = ((SQLCharExpr) valueExpr).getText();
+        } else if (valueExpr instanceof SQLIntegerExpr) {
+            valueStr = String.valueOf(((SQLIntegerExpr) valueExpr).getNumber());
+        } else if (valueExpr instanceof SQLBooleanExpr) {
+            valueStr = String.valueOf(((SQLBooleanExpr) valueExpr).getValue());
+        } else if (valueExpr instanceof SQLNumberExpr) {
+            valueStr = String.valueOf(((SQLNumberExpr) valueExpr).getNumber());
+        } else {
+            valueStr = valueExpr.toString();
+            // 移除可能的引号
+            if (valueStr.startsWith("'") && valueStr.endsWith("'")) {
+                valueStr = valueStr.substring(1, valueStr.length() - 1);
+            } else if (valueStr.startsWith("\"") && valueStr.endsWith("\"")) {
+                valueStr = valueStr.substring(1, valueStr.length() - 1);
+            }
         }
         
         switch (dataType) {

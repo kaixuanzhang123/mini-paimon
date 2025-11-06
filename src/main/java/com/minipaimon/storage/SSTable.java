@@ -1,5 +1,7 @@
 package com.minipaimon.storage;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.minipaimon.metadata.Row;
 import com.minipaimon.metadata.RowKey;
 
@@ -37,9 +39,15 @@ public class SSTable {
         /** 最大主键 */
         private final RowKey maxKey;
 
-        public Footer(long indexOffset, long indexSize, long bloomFilterOffset, 
-                     long bloomFilterSize, int dataBlockCount, long rowCount,
-                     RowKey minKey, RowKey maxKey) {
+        @JsonCreator
+        public Footer(@JsonProperty("indexOffset") long indexOffset, 
+                     @JsonProperty("indexSize") long indexSize, 
+                     @JsonProperty("bloomFilterOffset") long bloomFilterOffset, 
+                     @JsonProperty("bloomFilterSize") long bloomFilterSize, 
+                     @JsonProperty("dataBlockCount") int dataBlockCount, 
+                     @JsonProperty("rowCount") long rowCount,
+                     @JsonProperty("minKey") RowKey minKey, 
+                     @JsonProperty("maxKey") RowKey maxKey) {
             this.indexOffset = indexOffset;
             this.indexSize = indexSize;
             this.bloomFilterOffset = bloomFilterOffset;
@@ -83,7 +91,9 @@ public class SSTable {
         /** 数据块在文件中的偏移量 */
         private final long offset;
 
-        public IndexEntry(RowKey key, long offset) {
+        @JsonCreator
+        public IndexEntry(@JsonProperty("key") RowKey key, 
+                         @JsonProperty("offset") long offset) {
             this.key = key;
             this.offset = offset;
         }
@@ -105,7 +115,8 @@ public class SSTable {
         /** 数据块中的行数据 */
         private final List<RowData> rows;
 
-        public DataBlock(List<RowData> rows) {
+        @JsonCreator
+        public DataBlock(@JsonProperty("rows") List<RowData> rows) {
             this.rows = rows;
         }
 
@@ -129,7 +140,9 @@ public class SSTable {
         /** 行数据 */
         private final Row row;
 
-        public RowData(RowKey key, Row row) {
+        @JsonCreator
+        public RowData(@JsonProperty("key") RowKey key, 
+                      @JsonProperty("row") Row row) {
             this.key = key;
             this.row = row;
         }

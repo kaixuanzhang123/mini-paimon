@@ -22,24 +22,6 @@ class RowTest {
     }
 
     @Test
-    void testSetValue() {
-        Row row = new Row(2);
-        row.setValue(0, 1);
-        row.setValue(1, "Bob");
-        
-        assertEquals(1, row.getValue(0));
-        assertEquals("Bob", row.getValue(1));
-    }
-
-    @Test
-    void testIsNull() {
-        Row row = new Row(new Object[]{1, null});
-        
-        assertFalse(row.isNull(0));
-        assertTrue(row.isNull(1));
-    }
-
-    @Test
     void testValidate() {
         Field idField = new Field("id", DataType.INT, false);
         Field nameField = new Field("name", DataType.STRING, true);

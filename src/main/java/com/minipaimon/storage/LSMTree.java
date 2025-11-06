@@ -1,10 +1,11 @@
 package com.minipaimon.storage;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.minipaimon.exception.StorageException;
 import com.minipaimon.manifest.ManifestEntry;
 import com.minipaimon.metadata.Row;
 import com.minipaimon.metadata.RowKey;
 import com.minipaimon.metadata.Schema;
-import com.minipaimon.snapshot.Snapshot;
 import com.minipaimon.snapshot.SnapshotManager;
 import com.minipaimon.utils.PathFactory;
 import org.slf4j.Logger;
@@ -13,22 +14,17 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * LSM Tree 实现
- * 结合内存表和磁盘表，提供完整的键值存储功能
+ * LSM Tree 存储引擎主协调类
+ * 负责管理内存表和磁盘文件的读写操作
  */
 public class LSMTree {
     private static final Logger logger = LoggerFactory.getLogger(LSMTree.class);
     
-    /** 当前活跃的内存表 */
-    private MemTable activeMemTable;
-    
-    /** 正在刷写的内存表 */
-    private MemTable immutableMemTable;
-    
-    /** 表结构 */
+    /** Schema 定义 */
     private final Schema schema;
     
     /** 路径工厂 */
@@ -43,6 +39,12 @@ public class LSMTree {
     /** 序列号生成器 */
     private final AtomicLong sequenceGenerator;
     
+    /** 活跃内存表 */
+    private MemTable activeMemTable;
+    
+    /** 正在刷写的内存表 */
+    private MemTable immutableMemTable;
+    
     /** SSTable 读取器 */
     private final SSTableReader sstReader;
     
@@ -51,8 +53,11 @@ public class LSMTree {
     
     /** 快照管理器 */
     private final SnapshotManager snapshotManager;
-
-    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) {
+    
+    /** JSON 序列化工具 */
+    private final ObjectMapper objectMapper;
+    
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
@@ -61,38 +66,44 @@ public class LSMTree {
         this.sstReader = new SSTableReader();
         this.sstWriter = new SSTableWriter();
         this.snapshotManager = new SnapshotManager(pathFactory, database, table);
+        this.objectMapper = new ObjectMapper();
         
         // 初始化活跃内存表
         this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
         
+        // 创建表目录结构
+        pathFactory.createTableDirectories(database, table);
+        
         logger.info("LSMTree initialized for table {}/{}", database, table);
     }
-
+    
     /**
-     * 插入数据
+     * 向 LSM Tree 中插入或更新数据
      * 
      * @param row 数据行
      * @throws IOException 写入异常
      */
     public synchronized void put(Row row) throws IOException {
-        // 插入到活跃内存表
-        activeMemTable.put(row);
+        // 写入活跃内存表
+        int rowSize = activeMemTable.put(row);
+        
+        logger.debug("Put row, size: {} bytes", rowSize);
         
         // 检查是否需要刷写
-        if (activeMemTable.isFull()) {
+        if (activeMemTable.getSize() >= activeMemTable.getMaxSize() * 0.8) { // 80%阈值触发刷写
             flushMemTable();
         }
     }
-
+    
     /**
-     * 获取数据
+     * 从 LSM Tree 中获取数据
      * 
-     * @param key 主键
-     * @return 数据行，如果不存在返回null
+     * @param key 行键
+     * @return 对应的行数据，如果未找到返回 null
      * @throws IOException 读取异常
      */
-    public Row get(RowKey key) throws IOException {
-        // 1. 先在活跃内存表中查找
+    public synchronized Row get(RowKey key) throws IOException {
+        // 1. 在活跃内存表中查找
         Row row = activeMemTable.get(key);
         if (row != null) {
             return row;
@@ -108,6 +119,50 @@ public class LSMTree {
         
         // 3. 在磁盘上的 SSTable 中查找
         return getSSTableRow(key);
+    }
+
+    /**
+     * 扫描所有数据
+     * 
+     * @return 所有数据行的列表
+     * @throws IOException 读取异常
+     */
+    public List<Row> scan() throws IOException {
+        List<Row> allRows = new ArrayList<>();
+        
+        // 1. 从活跃内存表中获取数据
+        Map<RowKey, Row> activeData = activeMemTable.getAllData();
+        allRows.addAll(activeData.values());
+        
+        // 2. 从正在刷写的内存表中获取数据
+        if (immutableMemTable != null) {
+            Map<RowKey, Row> immutableData = immutableMemTable.getAllData();
+            allRows.addAll(immutableData.values());
+        }
+        
+        // 3. 从磁盘上的 SSTable 中获取数据
+        // 查找所有存在的 SSTable 文件
+        try {
+            // 首先尝试读取活跃内存表刷写的文件（如果有的话）
+            String sstPath1 = pathFactory.getSSTPath(database, table, 0, activeMemTable.getSequenceNumber()).toString();
+            if (java.nio.file.Files.exists(java.nio.file.Paths.get(sstPath1))) {
+                List<Row> sstRows1 = sstReader.scan(sstPath1);
+                allRows.addAll(sstRows1);
+            }
+            
+            // 然后尝试读取不可变内存表刷写的文件（如果有的话）
+            if (immutableMemTable != null) {
+                String sstPath2 = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
+                if (java.nio.file.Files.exists(java.nio.file.Paths.get(sstPath2))) {
+                    List<Row> sstRows2 = sstReader.scan(sstPath2);
+                    allRows.addAll(sstRows2);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Error reading SSTable files: {}", e.getMessage());
+        }
+        
+        return allRows;
     }
 
     /**
@@ -166,16 +221,34 @@ public class LSMTree {
      * 从 SSTable 中获取数据
      */
     private Row getSSTableRow(RowKey key) throws IOException {
-        // 简化实现：只查找最新的 SSTable 文件
-        // 实际实现中需要查找所有相关的 SSTable 文件并合并结果
-        String sstPath = pathFactory.getSSTPath(database, table, 0, 0).toString();
+        // 查找所有存在的 SSTable 文件
+        Row result = null;
         
         try {
-            return sstReader.get(sstPath, key);
-        } catch (IOException e) {
-            logger.debug("SSTable not found or error reading: {}", sstPath);
-            return null;
+            // 首先尝试读取活跃内存表刷写的文件（如果有的话）
+            String sstPath1 = pathFactory.getSSTPath(database, table, 0, activeMemTable.getSequenceNumber()).toString();
+            if (java.nio.file.Files.exists(java.nio.file.Paths.get(sstPath1))) {
+                result = sstReader.get(sstPath1, key);
+                if (result != null) {
+                    return result;
+                }
+            }
+            
+            // 然后尝试读取不可变内存表刷写的文件（如果有的话）
+            if (immutableMemTable != null) {
+                String sstPath2 = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
+                if (java.nio.file.Files.exists(java.nio.file.Paths.get(sstPath2))) {
+                    result = sstReader.get(sstPath2, key);
+                    if (result != null) {
+                        return result;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Error reading SSTable files: {}", e.getMessage());
         }
+        
+        return result;
     }
 
     /**

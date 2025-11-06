@@ -5,38 +5,40 @@ import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
 import com.minipaimon.metadata.Row;
 import com.minipaimon.metadata.RowKey;
-import com.minipaimon.utils.SerializationUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
  * SSTable 写入器
- * 负责将内存表刷写到磁盘文件
+ * 负责将内存表数据刷写到磁盘上的 SSTable 文件
  */
 public class SSTableWriter {
     private static final Logger logger = LoggerFactory.getLogger(SSTableWriter.class);
     
-    /** 默认数据块大小（4KB） */
+    /** 默认数据块大小 */
     private static final int DEFAULT_BLOCK_SIZE = 4096;
     
     /** 布隆过滤器误判率 */
     private static final double BLOOM_FILTER_FPP = 0.01;
     
-    /** ObjectMapper 用于序列化 */
+    /** JSON 序列化工具 */
     private final ObjectMapper objectMapper;
     
     public SSTableWriter() {
-        this.objectMapper = SerializationUtils.getObjectMapper();
+        this.objectMapper = new ObjectMapper();
     }
 
     /**
@@ -87,6 +89,9 @@ public class SSTableWriter {
             
             // 5. 写入 Footer
             writeFooter(fileChannel, footer);
+            
+            // 强制刷新到磁盘
+            fileChannel.force(true);
             
             logger.info("Successfully flushed MemTable to SSTable with {} entries, {} data blocks", 
                        entries.size(), dataBlocks.size());
@@ -264,15 +269,15 @@ public class SSTableWriter {
         // 序列化 Footer
         byte[] footerData = objectMapper.writeValueAsBytes(footer);
         
+        // 写入 Footer 数据
+        ByteBuffer dataBuffer = ByteBuffer.wrap(footerData);
+        fileChannel.write(dataBuffer);
+        
         // 写入 Footer 大小
         ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
         sizeBuffer.putInt(footerData.length);
         sizeBuffer.flip();
         fileChannel.write(sizeBuffer);
-        
-        // 写入 Footer 数据
-        ByteBuffer dataBuffer = ByteBuffer.wrap(footerData);
-        fileChannel.write(dataBuffer);
         
         // 写入魔数（标识文件结尾）
         ByteBuffer magicBuffer = ByteBuffer.allocate(4);

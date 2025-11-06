@@ -1,8 +1,6 @@
 package com.minipaimon.snapshot;
 
 import com.minipaimon.manifest.ManifestEntry;
-import com.minipaimon.manifest.ManifestFile;
-import com.minipaimon.manifest.ManifestList;
 import com.minipaimon.metadata.DataType;
 import com.minipaimon.metadata.Field;
 import com.minipaimon.metadata.RowKey;
@@ -16,10 +14,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Snapshot 测试类

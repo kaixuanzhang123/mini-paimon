@@ -1,80 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.minipaimon</groupId>
     <artifactId>mini-paimon</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <packaging>jar</packaging>
-
-    <name>Mini Paimon</name>
-    <description>A simplified implementation of Apache Paimon for learning purposes</description>
 
     <properties>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <guava.version>31.1-jre</guava.version>
-        <jackson.version>2.13.5</jackson.version>
-        <antlr.version>4.9.3</antlr.version>
-        <slf4j.version>1.7.36</slf4j.version>
-        <logback.version>1.2.12</logback.version>
-        <junit.version>5.9.3</junit.version>
     </properties>
 
     <dependencies>
-        <!-- Guava for collections and utilities -->
+        <!-- 日志框架 -->
         <dependency>
-            <groupId>com.google.guava</groupId>
-            <artifactId>guava</artifactId>
-            <version>${guava.version}</version>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.2.12</version>
+        </dependency>
+
+        <!-- Druid SQL Parser -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid</artifactId>
+            <version>1.2.20</version>
         </dependency>
 
         <!-- Jackson for JSON serialization -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
+            <version>2.15.2</version>
         </dependency>
+        
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>${jackson.version}</version>
+            <version>2.15.2</version>
         </dependency>
 
-        <!-- ANTLR for SQL parsing -->
+        <!-- Google Guava for utilities -->
         <dependency>
-            <groupId>org.antlr</groupId>
-            <artifactId>antlr4-runtime</artifactId>
-            <version>${antlr.version}</version>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>32.1.2-jre</version>
         </dependency>
 
-        <!-- Logging -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>${slf4j.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>${logback.version}</version>
-        </dependency>
-
-        <!-- Test dependencies -->
+        <!-- JUnit 测试框架 -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-api</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-engine</artifactId>
-            <version>${junit.version}</version>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -86,29 +65,9 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.8.1</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <source>8</source>
+                    <target>8</target>
                 </configuration>
-            </plugin>
-            <!-- ANTLR plugin will be added in SQL parsing phase -->
-            <!--
-            <plugin>
-                <groupId>org.antlr</groupId>
-                <artifactId>antlr4-maven-plugin</artifactId>
-                <version>${antlr.version}</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>antlr4</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0</version>
             </plugin>
         </plugins>
     </build>
