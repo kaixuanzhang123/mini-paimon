@@ -1,0 +1,452 @@
+package com.mini.paimon.storage;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mini.paimon.manifest.ManifestEntry;
+import com.mini.paimon.snapshot.SnapshotManager;
+import com.mini.paimon.utils.PathFactory;
+import com.mini.paimon.metadata.Row;
+import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.metadata.Schema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * LSM Tree 存储引擎主协调类
+ * 负责管理内存表和磁盘文件的读写操作
+ */
+public class LSMTree {
+    private static final Logger logger = LoggerFactory.getLogger(LSMTree.class);
+    
+    /** Schema 定义 */
+    private final Schema schema;
+    
+    /** 路径工厂 */
+    private final PathFactory pathFactory;
+    
+    /** 数据库名 */
+    private final String database;
+    
+    /** 表名 */
+    private final String table;
+    
+    /** 序列号生成器 */
+    private final AtomicLong sequenceGenerator;
+    
+    /** 活跃内存表 */
+    private MemTable activeMemTable;
+    
+    /** 正在刷写的内存表 */
+    private MemTable immutableMemTable;
+    
+    /** SSTable 读取器 */
+    private final SSTableReader sstReader;
+    
+    /** SSTable 写入器 */
+    private final SSTableWriter sstWriter;
+    
+    /** 快照管理器 */
+    private final SnapshotManager snapshotManager;
+    
+    /** JSON 序列化工具 */
+    private final ObjectMapper objectMapper;
+    
+    /** WAL */
+    private WriteAheadLog wal;
+    
+    /** Compactor */
+    private final Compactor compactor;
+    
+    /** 所有SSTable文件 */
+    private final List<Compactor.LeveledSSTable> sstables;
+    
+    /** WAL序列号 */
+    private final AtomicLong walSequence;
+    
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
+        this.schema = schema;
+        this.pathFactory = pathFactory;
+        this.database = database;
+        this.table = table;
+        this.sequenceGenerator = new AtomicLong(0);
+        this.walSequence = new AtomicLong(0);
+        this.sstReader = new SSTableReader();
+        this.sstWriter = new SSTableWriter();
+        this.snapshotManager = new SnapshotManager(pathFactory, database, table);
+        this.objectMapper = new ObjectMapper();
+        this.sstables = new ArrayList<>();
+        this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
+        
+        // 创建表目录结构
+        pathFactory.createTableDirectories(database, table);
+        
+        // 初始化活跃内存表
+        this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
+        
+        // 恢复 WAL 数据（只在有未处理的 WAL 时恢复）
+        int recoveredCount = recoverFromWAL();
+        
+        // 初始化新的 WAL
+        Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
+        this.wal = new WriteAheadLog(walPath);
+        
+        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL", 
+                   database, table, recoveredCount);
+    }
+    
+    /**
+     * 向 LSM Tree 中插入或更新数据
+     * 
+     * @param row 数据行
+     * @throws IOException 写入异常
+     */
+    public synchronized void put(Row row) throws IOException {
+        // 1. 先写WAL
+        wal.append(row);
+        
+        // 2. 写入活跃内存表
+        int rowSize = activeMemTable.put(row);
+        
+        logger.debug("Put row, size: {} bytes", rowSize);
+        
+        // 3. 检查是否需要刷写
+        if (activeMemTable.getSize() >= activeMemTable.getMaxSize() * 0.8) {
+            flushMemTable();
+        }
+    }
+    
+    /**
+     * 从 LSM Tree 中获取数据
+     * 
+     * @param key 行键
+     * @return 对应的行数据，如果未找到返回 null
+     * @throws IOException 读取异常
+     */
+    public synchronized Row get(RowKey key) throws IOException {
+        // 1. 在活跃内存表中查找
+        Row row = activeMemTable.get(key);
+        if (row != null) {
+            return row;
+        }
+        
+        // 2. 在正在刷写的内存表中查找
+        if (immutableMemTable != null) {
+            row = immutableMemTable.get(key);
+            if (row != null) {
+                return row;
+            }
+        }
+        
+        // 3. 在磁盘上的 SSTable 中查找（按层级从低到高）
+        List<Compactor.LeveledSSTable> sortedSSTables = new ArrayList<>(sstables);
+        sortedSSTables.sort((a, b) -> Integer.compare(a.getLevel(), b.getLevel()));
+        
+        for (Compactor.LeveledSSTable sst : sortedSSTables) {
+            row = sstReader.get(sst.getPath(), key);
+            if (row != null) {
+                return row;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * 扫描所有数据
+     * 
+     * @return 所有数据行的列表
+     * @throws IOException 读取异常
+     */
+    public List<Row> scan() throws IOException {
+        List<Row> allRows = new ArrayList<>();
+        
+        // 1. 从活跃内存表中获取数据
+        Map<RowKey, Row> activeData = activeMemTable.getAllData();
+        allRows.addAll(activeData.values());
+        
+        // 2. 从正在刷写的内存表中获取数据
+        if (immutableMemTable != null) {
+            Map<RowKey, Row> immutableData = immutableMemTable.getAllData();
+            allRows.addAll(immutableData.values());
+        }
+        
+        // 3. 从所有SSTable中获取数据
+        for (Compactor.LeveledSSTable sst : sstables) {
+            try {
+                List<Row> sstRows = sstReader.scan(sst.getPath());
+                allRows.addAll(sstRows);
+            } catch (Exception e) {
+                logger.warn("Error reading SSTable {}: {}", sst.getPath(), e.getMessage());
+            }
+        }
+        
+        return allRows;
+    }
+
+    /**
+     * 刷写内存表到磁盘
+     */
+    private void flushMemTable() throws IOException {
+        logger.info("Flushing memtable to SSTable");
+        
+        // 设置当前活跃内存表为不可变
+        immutableMemTable = activeMemTable;
+        
+        // 创建新的活跃内存表和WAL
+        activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
+        
+        // 切换WAL
+        wal.close();
+        walSequence.incrementAndGet();
+        Path newWalPath = pathFactory.getWalPath(database, table, walSequence.get());
+        wal = new WriteAheadLog(newWalPath);
+        
+        // 异步刷写不可变内存表到磁盘
+        flushImmutableMemTable();
+        
+        // 检查是否需要compaction
+        if (compactor.needsCompaction(sstables)) {
+            performCompaction();
+        }
+    }
+
+    /**
+     * 恢复 WAL 数据
+     * 只恢复未持久化到 SSTable 的数据
+     */
+    private int recoverFromWAL() throws IOException {
+        int totalRecovered = 0;
+        
+        // 扫描所有 WAL 文件
+        Path walDir = pathFactory.getWalDir(database, table);
+        if (!Files.exists(walDir)) {
+            return 0;
+        }
+        
+        // 查找所有 WAL 文件并按序号排序
+        List<Path> walFiles = new ArrayList<>();
+        try {
+            Files.list(walDir)
+                .filter(path -> path.getFileName().toString().endsWith(".log"))
+                .forEach(walFiles::add);
+        } catch (IOException e) {
+            logger.warn("Failed to list WAL files: {}", e.getMessage());
+            return 0;
+        }
+        
+        // 恢复每个 WAL 文件
+        for (Path walFile : walFiles) {
+            try {
+                WriteAheadLog tempWal = new WriteAheadLog(walFile);
+                List<Row> rows = tempWal.recover();
+                tempWal.close();
+                
+                // 将数据插入到活跃内存表
+                for (Row row : rows) {
+                    activeMemTable.put(row);
+                }
+                
+                totalRecovered += rows.size();
+                logger.info("Recovered {} rows from WAL: {}", rows.size(), walFile);
+                
+                // 恢复后删除 WAL 文件
+                Files.deleteIfExists(walFile);
+                logger.debug("Deleted recovered WAL: {}", walFile);
+                
+            } catch (Exception e) {
+                logger.warn("Failed to recover WAL {}: {}", walFile, e.getMessage());
+            }
+        }
+        
+        return totalRecovered;
+    }
+    
+    /**
+     * 刷写不可变内存表到磁盘
+     */
+    private void flushImmutableMemTable() throws IOException {
+        if (immutableMemTable == null || immutableMemTable.isEmpty()) {
+            immutableMemTable = null;
+            return;
+        }
+        
+        // 生成 SSTable 文件路径
+        String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
+        
+        // 刷写到磁盘
+        SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
+        
+        logger.info("Flushed memtable to SSTable: {}", sstPath);
+        
+        // 添加到SSTable列表
+        Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
+            sstPath, 0, footer.getMinKey(), footer.getMaxKey(),
+            Files.size(java.nio.file.Paths.get(sstPath)), footer.getRowCount()
+        );
+        sstables.add(sst);
+        
+        // 创建 Manifest 条目
+        List<ManifestEntry> manifestEntries = new ArrayList<>();
+        ManifestEntry entry = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            sstPath,
+            0, // level
+            footer.getMinKey(),
+            footer.getMaxKey(),
+            footer.getRowCount()
+        );
+        manifestEntries.add(entry);
+        
+        // 创建快照
+        snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+        
+        // 清理不可变内存表
+        immutableMemTable = null;
+        
+        // 关键修复：立即删除对应的旧 WAL 文件，避免重复恢复
+        // 这个 WAL 文件的数据已经持久化到 SSTable，不再需要
+        if (walSequence.get() > 0) {
+            Path oldWalPath = pathFactory.getWalPath(database, table, walSequence.get() - 1);
+            try {
+                Files.deleteIfExists(oldWalPath);
+                logger.info("Deleted persisted WAL after flush: {}", oldWalPath);
+            } catch (Exception e) {
+                logger.warn("Failed to delete WAL: {}", oldWalPath, e);
+            }
+        }
+    }
+
+    /**
+     * 执行Compaction
+     */
+    private void performCompaction() throws IOException {
+        logger.info("Starting compaction");
+        
+        Compactor.CompactionResult result = compactor.compact(sstables);
+        
+        if (!result.isEmpty()) {
+            // 移除输入文件
+            sstables.removeAll(result.getInputFiles());
+            
+            // 添加输出文件
+            sstables.addAll(result.getOutputFiles());
+            
+            // 删除旧文件
+            for (Compactor.LeveledSSTable sst : result.getInputFiles()) {
+                try {
+                    Files.deleteIfExists(java.nio.file.Paths.get(sst.getPath()));
+                    logger.debug("Deleted compacted file: {}", sst.getPath());
+                } catch (Exception e) {
+                    logger.warn("Failed to delete file: {}", sst.getPath(), e);
+                }
+            }
+            
+            logger.info("Compaction completed");
+        }
+    }
+
+    /**
+     * 从 SSTable 中获取数据（已废弃，由get方法处理）
+     */
+    @Deprecated
+    private Row getSSTableRow(RowKey key) throws IOException {
+        for (Compactor.LeveledSSTable sst : sstables) {
+            try {
+                Row row = sstReader.get(sst.getPath(), key);
+                if (row != null) {
+                    return row;
+                }
+            } catch (Exception e) {
+                logger.warn("Error reading SSTable {}: {}", sst.getPath(), e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 关闭 LSM Tree，刷写所有数据
+     */
+    public synchronized void close() throws IOException {
+        logger.info("Closing LSMTree, flushing all data");
+        
+        // 关闭当前 WAL
+        if (wal != null) {
+            wal.close();
+        }
+        
+        // 刷写活跃内存表
+        if (!activeMemTable.isEmpty()) {
+            String sstPath = pathFactory.getSSTPath(database, table, 0, activeMemTable.getSequenceNumber()).toString();
+            SSTable.Footer footer = sstWriter.flush(activeMemTable, sstPath);
+            
+            // 添加到SSTable列表
+            Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
+                sstPath, 0, footer.getMinKey(), footer.getMaxKey(),
+                Files.size(java.nio.file.Paths.get(sstPath)), footer.getRowCount()
+            );
+            sstables.add(sst);
+            
+            // 创建 Manifest 条目
+            List<ManifestEntry> manifestEntries = new ArrayList<>();
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                sstPath,
+                0, // level
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                footer.getRowCount()
+            );
+            manifestEntries.add(entry);
+            
+            // 创建快照
+            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+            
+            // 删除对应的 WAL 文件（数据已持久化）
+            Path currentWalPath = pathFactory.getWalPath(database, table, walSequence.get());
+            try {
+                Files.deleteIfExists(currentWalPath);
+                logger.info("Deleted WAL after final flush: {}", currentWalPath);
+            } catch (Exception e) {
+                logger.warn("Failed to delete WAL: {}", currentWalPath, e);
+            }
+        }
+        
+        // 刷写不可变内存表
+        if (immutableMemTable != null && !immutableMemTable.isEmpty()) {
+            String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
+            SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
+            
+            // 创建 Manifest 条目
+            List<ManifestEntry> manifestEntries = new ArrayList<>();
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                sstPath,
+                0, // level
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                footer.getRowCount()
+            );
+            manifestEntries.add(entry);
+            
+            // 创建快照
+            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+        }
+        
+        logger.info("LSMTree closed successfully");
+    }
+
+    /**
+     * 获取 LSM Tree 状态信息
+     */
+    public String getStatus() {
+        return String.format("LSMTree{activeMemTable=%s, immutableMemTable=%s}", 
+                           activeMemTable, immutableMemTable != null ? immutableMemTable : "null");
+    }
+}

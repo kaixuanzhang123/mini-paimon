@@ -8,7 +8,7 @@
 
 ### 1. TableMetadata（表元数据）
 
-**类**: [TableMetadata.java](src/main/java/com/minipaimon/metadata/TableMetadata.java)
+**类**: [TableMetadata.java](src/main/java/com/mini/paimon/metadata/TableMetadata.java)
 
 表元数据类管理表级别的信息，包括表名、数据库名、当前 Schema ID、创建时间等。
 
@@ -25,7 +25,7 @@
 
 ### 2. SchemaManager（Schema 管理器）
 
-**类**: [SchemaManager.java](src/main/java/com/minipaimon/metadata/SchemaManager.java)
+**类**: [SchemaManager.java](src/main/java/com/mini/paimon/metadata/SchemaManager.java)
 
 Schema 管理器负责表结构的版本管理、持久化和缓存。
 
@@ -43,7 +43,7 @@ Schema 管理器负责表结构的版本管理、持久化和缓存。
 
 ### 3. TableManager（表管理器）
 
-**类**: [TableManager.java](src/main/java/com/minipaimon/metadata/TableManager.java)
+**类**: [TableManager.java](src/main/java/com/mini/paimon/metadata/TableManager.java)
 
 表管理器是 Schema 管理的入口，负责表的创建、删除和元数据管理。
 

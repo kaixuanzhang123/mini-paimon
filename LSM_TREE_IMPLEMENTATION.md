@@ -8,7 +8,7 @@
 
 ### 1. MemTable（内存表）
 
-**类**: [MemTable.java](src/main/java/com/minipaimon/storage/MemTable.java)
+**类**: [MemTable.java](src/main/java/com/mini/paimon/storage/MemTable.java)
 
 MemTable 是 LSM Tree 的内存组件，使用 `ConcurrentSkipListMap` 实现有序存储。
 
@@ -26,7 +26,7 @@ MemTable 是 LSM Tree 的内存组件，使用 `ConcurrentSkipListMap` 实现有
 
 ### 2. SSTable（排序字符串表）
 
-**类**: [SSTable.java](src/main/java/com/minipaimon/storage/SSTable.java)
+**类**: [SSTable.java](src/main/java/com/mini/paimon/storage/SSTable.java)
 
 SSTable 是磁盘上的持久化存储格式，包含数据块、索引块、布隆过滤器和元信息。
 
@@ -55,7 +55,7 @@ SSTable 是磁盘上的持久化存储格式，包含数据块、索引块、布
 
 ### 3. SSTableWriter（SSTable写入器）
 
-**类**: [SSTableWriter.java](src/main/java/com/minipaimon/storage/SSTableWriter.java)
+**类**: [SSTableWriter.java](src/main/java/com/mini/paimon/storage/SSTableWriter.java)
 
 负责将 MemTable 中的数据刷写到磁盘上的 SSTable 文件。
 
@@ -70,7 +70,7 @@ SSTable 是磁盘上的持久化存储格式，包含数据块、索引块、布
 
 ### 4. SSTableReader（SSTable读取器）
 
-**类**: [SSTableReader.java](src/main/java/com/minipaimon/storage/SSTableReader.java)
+**类**: [SSTableReader.java](src/main/java/com/mini/paimon/storage/SSTableReader.java)
 
 负责从磁盘上的 SSTable 文件中读取数据。
 
@@ -86,7 +86,7 @@ Query Key ──▶ Bloom Filter ──▶ Index Block ──▶ Data Block ─�
 
 ### 5. LSMTree（LSM树主类）
 
-**类**: [LSMTree.java](src/main/java/com/minipaimon/storage/LSMTree.java)
+**类**: [LSMTree.java](src/main/java/com/mini/paimon/storage/LSMTree.java)
 
 LSM Tree 的主入口，协调内存表和磁盘表的操作。
 
@@ -161,7 +161,7 @@ lsmTree.close();
 
 LSM Tree 实现了完整的文件持久化功能：
 
-1. **文件路径管理**: 使用 [PathFactory](src/main/java/com/minipaimon/utils/PathFactory.java) 统一管理文件路径
+1. **文件路径管理**: 使用 [PathFactory](src/main/java/com/mini/paimon/utils/PathFactory.java) 统一管理文件路径
 2. **SSTable 文件**: 数据持久化到磁盘文件，格式为 `data-{level}-{sequence}.sst`
 3. **目录结构**: 遵循标准的 Paimon 目录布局
 
