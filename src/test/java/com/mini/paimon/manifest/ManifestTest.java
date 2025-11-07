@@ -41,17 +41,28 @@ class ManifestTest {
 
     @Test
     void testManifestEntry() {
-        ManifestEntry entry = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta = new DataFileMeta(
             "./data/data-0-001.sst",
-            0,
+            1024,
+            100,
             new RowKey(new byte[]{0, 0, 0, 1}),
             new RowKey(new byte[]{0, 0, 0, (byte) 10}),
-            100
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        ManifestEntry entry = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            0,
+            fileMeta
         );
         
         assertEquals(ManifestEntry.FileKind.ADD, entry.getKind());
-        assertEquals("./data/data-0-001.sst", entry.getFile());
+        assertEquals(0, entry.getBucket());
+        assertEquals(fileMeta, entry.getFile());
+        assertEquals("./data/data-0-001.sst", entry.getFileName());
         assertEquals(0, entry.getLevel());
         Assertions.assertEquals(new RowKey(new byte[]{0, 0, 0, 1}), entry.getMinKey());
         Assertions.assertEquals(new RowKey(new byte[]{0, 0, 0, (byte) 10}), entry.getMaxKey());
@@ -60,23 +71,40 @@ class ManifestTest {
 
     @Test
     void testManifestFile() throws IOException {
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta1 = new DataFileMeta(
+            "./data/data-0-001.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 1}),
+            new RowKey(new byte[]{0, 0, 0, (byte) 10}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        DataFileMeta fileMeta2 = new DataFileMeta(
+            "./data/data-0-002.sst",
+            512,
+            50,
+            new RowKey(new byte[]{0, 0, 0, (byte) 11}),
+            new RowKey(new byte[]{0, 0, 0, (byte) 20}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
         // 创建 Manifest 条目
         ManifestEntry entry1 = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-001.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, (byte) 10}),
-            100
+            fileMeta1
         );
         
         ManifestEntry entry2 = new ManifestEntry(
             ManifestEntry.FileKind.DELETE,
-            "./data/data-0-002.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, (byte) 11}),
-            new RowKey(new byte[]{0, 0, 0, (byte) 20}),
-            50
+            fileMeta2
         );
         
         // 创建 Manifest 文件
@@ -132,13 +160,21 @@ class ManifestTest {
         assertFalse(ManifestFile.exists(pathFactory, "test_db", "test_table", "nonexistent"));
         
         // 创建一个 Manifest 文件来测试
-        ManifestEntry entry = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
+        DataFileMeta fileMeta = new DataFileMeta(
             "./data/data-0-001.sst",
-            0,
+            1024,
+            100,
             new RowKey(new byte[]{0, 0, 0, 1}),
             new RowKey(new byte[]{0, 0, 0, (byte) 10}),
-            100
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        ManifestEntry entry = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            0,
+            fileMeta
         );
         
         ManifestFile manifestFile = new ManifestFile(Collections.singletonList(entry));

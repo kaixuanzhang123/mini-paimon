@@ -4,6 +4,7 @@ import com.mini.paimon.utils.IdGenerator;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
+import com.mini.paimon.manifest.ManifestFileMeta;
 import com.mini.paimon.manifest.ManifestList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,9 +63,48 @@ public class SnapshotManager {
         ManifestFile manifestFile = new ManifestFile(manifestEntries);
         manifestFile.persist(pathFactory, database, table, manifestId);
         
+        // 计算 Manifest 文件的元信息
+        long fileSize = 0;
+        long numAddedFiles = 0;
+        long numDeletedFiles = 0;
+        com.mini.paimon.metadata.RowKey minKey = null;
+        com.mini.paimon.metadata.RowKey maxKey = null;
+        
+        for (ManifestEntry entry : manifestEntries) {
+            fileSize += entry.getFile().getFileSize();
+            if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                numAddedFiles++;
+            } else {
+                numDeletedFiles++;
+            }
+            
+            // 更新 minKey 和 maxKey
+            if (entry.getMinKey() != null) {
+                if (minKey == null || entry.getMinKey().compareTo(minKey) < 0) {
+                    minKey = entry.getMinKey();
+                }
+            }
+            if (entry.getMaxKey() != null) {
+                if (maxKey == null || entry.getMaxKey().compareTo(maxKey) > 0) {
+                    maxKey = entry.getMaxKey();
+                }
+            }
+        }
+        
+        // 创建 ManifestFileMeta
+        ManifestFileMeta manifestFileMeta = new ManifestFileMeta(
+            "manifest-" + manifestId,
+            fileSize,
+            numAddedFiles,
+            numDeletedFiles,
+            schemaId,
+            minKey,
+            maxKey
+        );
+        
         // 创建 Manifest List
         ManifestList manifestList = new ManifestList();
-        manifestList.addManifestFile("manifest-" + manifestId);
+        manifestList.addManifestFile(manifestFileMeta);
         
         // 如果存在之前的快照，将其 Manifest 文件也加入到列表中
         if (Snapshot.hasLatestSnapshot(pathFactory, database, table)) {
@@ -72,7 +112,7 @@ public class SnapshotManager {
                 Snapshot previousSnapshot = Snapshot.loadLatest(pathFactory, database, table);
                 ManifestList previousManifestList = ManifestList.load(
                     pathFactory, database, table, previousSnapshot.getSnapshotId());
-                for (String prevManifestFile : previousManifestList.getManifestFiles()) {
+                for (ManifestFileMeta prevManifestFile : previousManifestList.getManifestFiles()) {
                     manifestList.addManifestFile(prevManifestFile);
                 }
             } catch (IOException e) {
@@ -167,8 +207,9 @@ public class SnapshotManager {
             pathFactory, database, table, latestSnapshot.getSnapshotId());
         
         List<ManifestEntry> activeFiles = new ArrayList<>();
-        for (String manifestFileName : manifestList.getManifestFiles()) {
+        for (ManifestFileMeta manifestFileMeta : manifestList.getManifestFiles()) {
             // 从文件名中提取ID
+            String manifestFileName = manifestFileMeta.getFileName();
             String manifestId = manifestFileName.substring("manifest-".length());
             ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
             activeFiles.addAll(manifest.getEntries());

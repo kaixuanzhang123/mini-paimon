@@ -1,15 +1,18 @@
 package com.mini.paimon.manifest;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.mini.paimon.metadata.RowKey;
 
 import java.util.Objects;
 
 /**
- * Manifest 条目
+ * Manifest Entry
+ * 参考 Paimon 的 ManifestEntry 设计
  * 记录数据文件的变更（添加/删除）
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ManifestEntry {
     /** 操作类型 */
     public enum FileKind {
@@ -22,59 +25,54 @@ public class ManifestEntry {
     /** 操作类型 */
     private final FileKind kind;
     
-    /** 文件路径 */
-    private final String file;
+    /** Bucket ID */
+    private final int bucket;
     
-    /** 文件所在的层级 */
-    private final int level;
-    
-    /** 文件中最小的键 */
-    private final RowKey minKey;
-    
-    /** 文件中最大的键 */
-    private final RowKey maxKey;
-    
-    /** 文件中的行数 */
-    private final long rowCount;
+    /** 数据文件元信息 */
+    private final DataFileMeta file;
 
     @JsonCreator
     public ManifestEntry(
             @JsonProperty("kind") FileKind kind,
-            @JsonProperty("file") String file,
-            @JsonProperty("level") int level,
-            @JsonProperty("minKey") RowKey minKey,
-            @JsonProperty("maxKey") RowKey maxKey,
-            @JsonProperty("rowCount") long rowCount) {
+            @JsonProperty("bucket") int bucket,
+            @JsonProperty("file") DataFileMeta file) {
         this.kind = Objects.requireNonNull(kind, "File kind cannot be null");
-        this.file = Objects.requireNonNull(file, "File path cannot be null");
-        this.level = level;
-        this.minKey = minKey;
-        this.maxKey = maxKey;
-        this.rowCount = rowCount;
+        this.bucket = bucket;
+        this.file = Objects.requireNonNull(file, "Data file meta cannot be null");
     }
 
     public FileKind getKind() {
         return kind;
     }
 
-    public String getFile() {
+    public int getBucket() {
+        return bucket;
+    }
+
+    public DataFileMeta getFile() {
         return file;
     }
-
+    
+    // 为了向后兼容，保留一些便捷方法
+    
+    public String getFileName() {
+        return file.getFileName();
+    }
+    
     public int getLevel() {
-        return level;
+        return file.getLevel();
     }
-
+    
     public RowKey getMinKey() {
-        return minKey;
+        return file.getMinKey();
     }
-
+    
     public RowKey getMaxKey() {
-        return maxKey;
+        return file.getMaxKey();
     }
-
+    
     public long getRowCount() {
-        return rowCount;
+        return file.getRowCount();
     }
 
     @Override
@@ -82,28 +80,41 @@ public class ManifestEntry {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ManifestEntry that = (ManifestEntry) o;
-        return level == that.level &&
-                rowCount == that.rowCount &&
+        return bucket == that.bucket &&
                 kind == that.kind &&
-                file.equals(that.file) &&
-                Objects.equals(minKey, that.minKey) &&
-                Objects.equals(maxKey, that.maxKey);
+                file.equals(that.file);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, file, level, minKey, maxKey, rowCount);
+        return Objects.hash(kind, bucket, file);
     }
 
     @Override
     public String toString() {
         return "ManifestEntry{" +
                 "kind=" + kind +
-                ", file='" + file + '\'' +
-                ", level=" + level +
-                ", minKey=" + minKey +
-                ", maxKey=" + maxKey +
-                ", rowCount=" + rowCount +
+                ", bucket=" + bucket +
+                ", file=" + file +
                 '}';
+    }
+    
+    /**
+     * 创建 ADD 类型的 ManifestEntry
+     * 便捷方法，简化创建过程
+     */
+    public static ManifestEntry addFile(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            RowKey minKey,
+            RowKey maxKey,
+            int schemaId,
+            int level) {
+        DataFileMeta fileMeta = new DataFileMeta(
+            fileName, fileSize, rowCount, minKey, maxKey,
+            schemaId, level, System.currentTimeMillis()
+        );
+        return new ManifestEntry(FileKind.ADD, 0, fileMeta);
     }
 }

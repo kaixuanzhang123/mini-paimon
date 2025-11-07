@@ -13,6 +13,10 @@ import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.TableManager;
 import com.mini.paimon.storage.LSMTree;
+import com.mini.paimon.table.DataTableRead;
+import com.mini.paimon.table.DataTableScan;
+import com.mini.paimon.table.Predicate;
+import com.mini.paimon.table.Projection;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.metadata.Schema;
 
@@ -206,6 +210,7 @@ public class SQLParser {
     
     /**
      * 解析并执行 SELECT 语句
+     * 支持字段投影和 WHERE 条件过滤
      * 
      * @param stmt SELECT 语句
      * @throws IOException 解析或执行错误
@@ -219,17 +224,7 @@ public class SQLParser {
         
         SQLSelectQueryBlock queryBlock = (SQLSelectQueryBlock) query;
         
-        // 检查是否是简单的SELECT *查询
-        if (queryBlock.getSelectList().size() != 1) {
-            throw new IllegalArgumentException("Only SELECT * is supported");
-        }
-        
-        SQLSelectItem selectItem = queryBlock.getSelectList().get(0);
-        if (!(selectItem.getExpr() instanceof SQLAllColumnExpr)) {
-            throw new IllegalArgumentException("Only SELECT * is supported");
-        }
-        
-        // 获取表名
+        // 1. 获取表名
         if (!(queryBlock.getFrom() instanceof SQLExprTableSource)) {
             throw new IllegalArgumentException("Only single table SELECT is supported");
         }
@@ -237,7 +232,7 @@ public class SQLParser {
         SQLExprTableSource tableSource = (SQLExprTableSource) queryBlock.getFrom();
         String tableName = tableSource.getExpr().toString();
         
-        // 获取表的 Schema
+        // 2. 获取表的 Schema
         Schema schema = tableManager.getSchemaManager("default", tableName)
                                    .getCurrentSchema();
         
@@ -245,13 +240,29 @@ public class SQLParser {
             throw new IOException("Table '" + tableName + "' not found");
         }
         
-        // 从LSMTree中读取数据
-        LSMTree lsmTree = new LSMTree(schema, pathFactory, "default", tableName);
-        List<Row> rows = lsmTree.scan(); // 获取所有数据
-        lsmTree.close();
+        // 3. 解析投影（SELECT 字段列表）
+        Projection projection = parseProjection(queryBlock, schema);
         
-        // 打印结果
-        printResults(schema, rows);
+        // 4. 解析 WHERE 条件
+        Predicate predicate = parseWhere(queryBlock, schema);
+        
+        // 5. 执行查询：DataTableScan -> DataTableRead
+        DataTableScan tableScan = new DataTableScan(pathFactory, "default", tableName, schema);
+        DataTableScan.Plan plan = tableScan.plan();
+        
+        DataTableRead tableRead = new DataTableRead(schema);
+        if (projection != null) {
+            tableRead.withProjection(projection);
+        }
+        if (predicate != null) {
+            tableRead.withFilter(predicate);
+        }
+        
+        List<Row> rows = tableRead.read(plan);
+        
+        // 6. 打印结果
+        Schema resultSchema = projection != null ? projection.projectSchema(schema) : schema;
+        printResults(resultSchema, rows);
     }
     
     /**
@@ -359,5 +370,122 @@ public class SQLParser {
             default:
                 throw new IllegalArgumentException("Unsupported data type: " + dataType);
         }
+    }
+    
+    /**
+     * 解析投影（SELECT 字段列表）
+     */
+    private Projection parseProjection(SQLSelectQueryBlock queryBlock, Schema schema) {
+        List<SQLSelectItem> selectItems = queryBlock.getSelectList();
+        
+        // 检查是否是 SELECT *
+        if (selectItems.size() == 1 && selectItems.get(0).getExpr() instanceof SQLAllColumnExpr) {
+            return Projection.all();
+        }
+        
+        // 解析具体字段
+        List<String> fields = new ArrayList<>();
+        for (SQLSelectItem item : selectItems) {
+            SQLExpr expr = item.getExpr();
+            
+            if (expr instanceof SQLIdentifierExpr) {
+                fields.add(((SQLIdentifierExpr) expr).getName());
+            } else if (expr instanceof SQLPropertyExpr) {
+                // 支持 table.column 形式
+                fields.add(((SQLPropertyExpr) expr).getName());
+            } else {
+                throw new IllegalArgumentException("Unsupported SELECT expression: " + expr);
+            }
+        }
+        
+        return Projection.of(fields);
+    }
+    
+    /**
+     * 解析 WHERE 条件
+     */
+    private Predicate parseWhere(SQLSelectQueryBlock queryBlock, Schema schema) {
+        SQLExpr whereExpr = queryBlock.getWhere();
+        if (whereExpr == null) {
+            return null;
+        }
+        
+        return parseExpression(whereExpr, schema);
+    }
+    
+    /**
+     * 解析表达式为谓词
+     */
+    private Predicate parseExpression(SQLExpr expr, Schema schema) {
+        if (expr instanceof SQLBinaryOpExpr) {
+            SQLBinaryOpExpr binaryExpr = (SQLBinaryOpExpr) expr;
+            
+            // 逻辑运算符
+            if (binaryExpr.getOperator() == SQLBinaryOperator.BooleanAnd) {
+                Predicate left = parseExpression(binaryExpr.getLeft(), schema);
+                Predicate right = parseExpression(binaryExpr.getRight(), schema);
+                return left.and(right);
+            } else if (binaryExpr.getOperator() == SQLBinaryOperator.BooleanOr) {
+                Predicate left = parseExpression(binaryExpr.getLeft(), schema);
+                Predicate right = parseExpression(binaryExpr.getRight(), schema);
+                return left.or(right);
+            }
+            
+            // 比较运算符
+            String fieldName = extractFieldName(binaryExpr.getLeft());
+            Object value = extractValue(binaryExpr.getRight(), schema, fieldName);
+            
+            switch (binaryExpr.getOperator()) {
+                case Equality:
+                    return Predicate.equal(fieldName, value);
+                case NotEqual:
+                case LessThanOrGreater:
+                    return Predicate.notEqual(fieldName, value);
+                case GreaterThan:
+                    return Predicate.greaterThan(fieldName, value);
+                case GreaterThanOrEqual:
+                    return Predicate.greaterOrEqual(fieldName, value);
+                case LessThan:
+                    return Predicate.lessThan(fieldName, value);
+                case LessThanOrEqual:
+                    return Predicate.lessOrEqual(fieldName, value);
+                default:
+                    throw new IllegalArgumentException("Unsupported operator: " + binaryExpr.getOperator());
+            }
+        }
+        
+        throw new IllegalArgumentException("Unsupported WHERE expression: " + expr);
+    }
+    
+    /**
+     * 提取字段名
+     */
+    private String extractFieldName(SQLExpr expr) {
+        if (expr instanceof SQLIdentifierExpr) {
+            return ((SQLIdentifierExpr) expr).getName();
+        } else if (expr instanceof SQLPropertyExpr) {
+            return ((SQLPropertyExpr) expr).getName();
+        }
+        throw new IllegalArgumentException("Unsupported field expression: " + expr);
+    }
+    
+    /**
+     * 提取值
+     */
+    private Object extractValue(SQLExpr expr, Schema schema, String fieldName) {
+        // 查找字段类型
+        DataType dataType = null;
+        for (Field field : schema.getFields()) {
+            if (field.getName().equals(fieldName)) {
+                dataType = field.getType();
+                break;
+            }
+        }
+        
+        if (dataType == null) {
+            throw new IllegalArgumentException("Field not found: " + fieldName);
+        }
+        
+        return convertValue(expr, dataType);
     }
 }

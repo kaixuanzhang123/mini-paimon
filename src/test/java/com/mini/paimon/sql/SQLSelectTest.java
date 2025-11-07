@@ -27,7 +27,7 @@ public class SQLSelectTest {
             
             // 先创建表
             System.out.println("1. 创建表:");
-            String createTableSQL = "CREATE TABLE users (id INT NOT NULL PRIMARY KEY, name VARCHAR(50), age INT)";
+            String createTableSQL = "CREATE TABLE users (id INT , name VARCHAR(50), age INT)";
             sqlParser.executeSQL(createTableSQL);
             
             // 插入数据但不立即关闭LSMTree

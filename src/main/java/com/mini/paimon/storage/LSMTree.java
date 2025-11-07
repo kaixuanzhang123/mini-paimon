@@ -93,12 +93,15 @@ public class LSMTree {
         // 恢复 WAL 数据（只在有未处理的 WAL 时恢复）
         int recoveredCount = recoverFromWAL();
         
+        // 加载已有的 SSTable 文件
+        loadExistingSSTables();
+        
         // 初始化新的 WAL
         Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
         this.wal = new WriteAheadLog(walPath);
         
-        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL", 
-                   database, table, recoveredCount);
+        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables", 
+                   database, table, recoveredCount, sstables.size());
     }
     
     /**
@@ -269,6 +272,81 @@ public class LSMTree {
     }
     
     /**
+     * 加载已存在的 SSTable 文件
+     * 从 data 目录扫描所有 .sst 文件并加载元信息
+     */
+    private void loadExistingSSTables() throws IOException {
+        Path dataDir = pathFactory.getDataDir(database, table);
+        if (!Files.exists(dataDir)) {
+            return;
+        }
+        
+        List<Path> sstFiles = new ArrayList<>();
+        try {
+            Files.list(dataDir)
+                .filter(path -> path.getFileName().toString().endsWith(".sst"))
+                .forEach(sstFiles::add);
+        } catch (IOException e) {
+            logger.warn("Failed to list SSTable files: {}", e.getMessage());
+            return;
+        }
+        
+        for (Path sstFile : sstFiles) {
+            try {
+                // 使用 SSTableReader.get() 的方式：先读取一个空查询获取 Footer 信息
+                // 或者直接读取文件获取 footer
+                java.io.RandomAccessFile raf = new java.io.RandomAccessFile(sstFile.toFile(), "r");
+                long fileSize = raf.length();
+                
+                // 读取 Footer（最后 8 字节）
+                raf.seek(fileSize - 8);
+                int footerSize = raf.readInt();
+                
+                // 读取 Footer 数据
+                raf.seek(fileSize - 8 - footerSize);
+                byte[] footerBytes = new byte[footerSize];
+                raf.readFully(footerBytes);
+                raf.close();
+                
+                // 反序列化 Footer
+                SSTable.Footer footer = objectMapper.readValue(footerBytes, SSTable.Footer.class);
+                
+                // 从文件名解析 level（格式：data-{level}-{sequence}.sst）
+                String fileName = sstFile.getFileName().toString();
+                int level = 0;
+                try {
+                    String[] parts = fileName.replace(".sst", "").split("-");
+                    if (parts.length >= 2) {
+                        level = Integer.parseInt(parts[1]);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to parse level from filename: {}", fileName);
+                }
+                
+                // 创建 LeveledSSTable 并添加到列表
+                Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
+                    sstFile.toString(),
+                    level,
+                    footer.getMinKey(),
+                    footer.getMaxKey(),
+                    Files.size(sstFile),
+                    footer.getRowCount()
+                );
+                sstables.add(sst);
+                
+                logger.debug("Loaded SSTable: {} (level={}, rows={})", 
+                            fileName, level, footer.getRowCount());
+                
+            } catch (Exception e) {
+                logger.warn("Failed to load SSTable {}: {}", sstFile, e.getMessage());
+            }
+        }
+        
+        // 按层级排序（低层级在前）
+        sstables.sort((a, b) -> Integer.compare(a.getLevel(), b.getLevel()));
+    }
+    
+    /**
      * 刷写不可变内存表到磁盘
      */
     private void flushImmutableMemTable() throws IOException {
@@ -294,13 +372,14 @@ public class LSMTree {
         
         // 创建 Manifest 条目
         List<ManifestEntry> manifestEntries = new ArrayList<>();
-        ManifestEntry entry = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
+        ManifestEntry entry = ManifestEntry.addFile(
             sstPath,
-            0, // level
+            Files.size(java.nio.file.Paths.get(sstPath)),
+            footer.getRowCount(),
             footer.getMinKey(),
             footer.getMaxKey(),
-            footer.getRowCount()
+            schema.getSchemaId(),
+            0 // level
         );
         manifestEntries.add(entry);
         
@@ -395,13 +474,14 @@ public class LSMTree {
             
             // 创建 Manifest 条目
             List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = new ManifestEntry(
-                ManifestEntry.FileKind.ADD,
+            ManifestEntry entry = ManifestEntry.addFile(
                 sstPath,
-                0, // level
+                Files.size(java.nio.file.Paths.get(sstPath)),
+                footer.getRowCount(),
                 footer.getMinKey(),
                 footer.getMaxKey(),
-                footer.getRowCount()
+                schema.getSchemaId(),
+                0 // level
             );
             manifestEntries.add(entry);
             
@@ -425,13 +505,14 @@ public class LSMTree {
             
             // 创建 Manifest 条目
             List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = new ManifestEntry(
-                ManifestEntry.FileKind.ADD,
+            ManifestEntry entry = ManifestEntry.addFile(
                 sstPath,
-                0, // level
+                Files.size(java.nio.file.Paths.get(sstPath)),
+                footer.getRowCount(),
                 footer.getMinKey(),
                 footer.getMaxKey(),
-                footer.getRowCount()
+                schema.getSchemaId(),
+                0 // level
             );
             manifestEntries.add(entry);
             

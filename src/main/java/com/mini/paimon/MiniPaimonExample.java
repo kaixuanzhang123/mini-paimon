@@ -5,10 +5,9 @@ import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableManager;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.manifest.ManifestEntry;
-import com.minipaimon.metadata.*;
+import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.storage.LSMTree;
@@ -39,15 +38,8 @@ public class MiniPaimonExample {
         
         System.out.println("创建表结构: " + schema);
         
-        // 阶段四：元数据管理
-        System.out.println("\n2. 元数据管理");
-        TableManager tableManager = new TableManager(pathFactory);
-        tableManager.createTable("example_db", "user_table", 
-                                schema.getFields(), schema.getPrimaryKeys(), Collections.emptyList());
-        System.out.println("创建表: example_db.user_table");
-        
         // 阶段二：LSM Tree 存储引擎
-        System.out.println("\n3. LSM Tree 存储引擎");
+        System.out.println("\n2. LSM Tree 存储引擎");
         LSMTree lsmTree = new LSMTree(schema, pathFactory, "example_db", "user_table");
         
         // 插入数据
@@ -70,27 +62,43 @@ public class MiniPaimonExample {
         System.out.println("查询数据 (id=1): " + retrievedRow1);
         System.out.println("查询数据 (id=2): " + retrievedRow2);
         
-        // 阶段五：Snapshot 机制
-        System.out.println("\n4. Snapshot 机制");
+        // 阶段三：Snapshot 机制
+        System.out.println("\n3. Snapshot 机制");
         SnapshotManager snapshotManager = new SnapshotManager(pathFactory, "example_db", "user_table");
         
         // 创建一些 Manifest 条目来模拟数据文件变更
-        ManifestEntry entry1 = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
+        DataFileMeta fileMeta1 = new DataFileMeta(
             "./data/data-0-001.sst",
-            0,
+            1024,
+            100,
             new RowKey(new byte[]{0, 0, 0, 1}),
             new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        ManifestEntry entry1 = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            0,
+            fileMeta1
+        );
+        
+        DataFileMeta fileMeta2 = new DataFileMeta(
+            "./data/data-0-002.sst",
+            512,
+            50,
+            new RowKey(new byte[]{0, 0, 0, 11}),
+            new RowKey(new byte[]{0, 0, 0, 20}),
+            0,
+            0,
+            System.currentTimeMillis()
         );
         
         ManifestEntry entry2 = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-002.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 11}),
-            new RowKey(new byte[]{0, 0, 0, 20}),
-            50
+            fileMeta2
         );
         
         // 创建快照
@@ -98,22 +106,38 @@ public class MiniPaimonExample {
         System.out.println("创建快照 1: " + snapshot1.getSnapshotId());
         
         // 创建更多条目
-        ManifestEntry entry3 = new ManifestEntry(
-            ManifestEntry.FileKind.DELETE,
+        DataFileMeta fileMeta3 = new DataFileMeta(
             "./data/data-0-001.sst",
-            0,
+            1024,
+            100,
             new RowKey(new byte[]{0, 0, 0, 1}),
             new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        ManifestEntry entry3 = new ManifestEntry(
+            ManifestEntry.FileKind.DELETE,
+            0,
+            fileMeta3
+        );
+        
+        DataFileMeta fileMeta4 = new DataFileMeta(
+            "./data/data-0-003.sst",
+            768,
+            75,
+            new RowKey(new byte[]{0, 0, 0, 21}),
+            new RowKey(new byte[]{0, 0, 0, 30}),
+            0,
+            0,
+            System.currentTimeMillis()
         );
         
         ManifestEntry entry4 = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-003.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 21}),
-            new RowKey(new byte[]{0, 0, 0, 30}),
-            75
+            fileMeta4
         );
         
         // 创建第二个快照
