@@ -229,8 +229,7 @@ manifest/
 └── ...
 ```
 
-#### 8. 完整的目录结构
-
+**文件组织**
 ```
 warehouse/{database}/{table}/
 ├── data/              ← SSTable 数据文件
@@ -255,12 +254,12 @@ warehouse/{database}/{table}/
 
 ### 📚 完整文档
 
-- [ADVANCED_FEATURES.md](ADVANCED_FEATURES.md) - 高级特性详细技术文档
-- [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - 实现总结和使用指南
-- [ARCHITECTURE.md](ARCHITECTURE.md) - 系统架构和流程图
-- [WAL_FIX_SUMMARY.md](WAL_FIX_SUMMARY.md) - WAL 数据重复问题修复说明
-- [LSM_TREE_IMPLEMENTATION.md](LSM_TREE_IMPLEMENTATION.md) - LSM Tree 实现细节
-- [SCHEMA_MANAGEMENT.md](SCHEMA_MANAGEMENT.md) - Schema 管理文档
+- [advanced_features.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/advanced_features.md) - 高级特性详细技术文档
+- [implementation_summary.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/implementation_summary.md) - 实现总结和使用指南
+- [architecture.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/architecture.md) - 系统架构和流程图
+- [wal_fix_summary.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/wal_fix_summary.md) - WAL 数据重复问题修复说明
+- [lsm_tree_implementation.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/lsm_tree_implementation.md) - LSM Tree 实现细节
+- [schema_management.md](file:///Users/kaixuanzhang/alibaba/mini-paimon/schema_management.md) - Schema 管理文档
 
 ## 🚀 快速开始
 
