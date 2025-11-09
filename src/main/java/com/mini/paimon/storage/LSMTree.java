@@ -19,55 +19,28 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * LSM Tree 存储引擎主协调类
- * 负责管理内存表和磁盘文件的读写操作
+ * LSM Tree 存储引擎
+ * 参考 Paimon 设计，负责数据的读写操作
  */
 public class LSMTree {
     private static final Logger logger = LoggerFactory.getLogger(LSMTree.class);
     
-    /** Schema 定义 */
     private final Schema schema;
-    
-    /** 路径工厂 */
     private final PathFactory pathFactory;
-    
-    /** 数据库名 */
     private final String database;
-    
-    /** 表名 */
     private final String table;
-    
-    /** 序列号生成器 */
     private final AtomicLong sequenceGenerator;
     
-    /** 活跃内存表 */
     private MemTable activeMemTable;
-    
-    /** 正在刷写的内存表 */
     private MemTable immutableMemTable;
     
-    /** SSTable 读取器 */
     private final SSTableReader sstReader;
-    
-    /** SSTable 写入器 */
     private final SSTableWriter sstWriter;
-    
-    /** 快照管理器 */
     private final SnapshotManager snapshotManager;
-    
-    /** JSON 序列化工具 */
     private final ObjectMapper objectMapper;
-    
-    /** WAL */
     private WriteAheadLog wal;
-    
-    /** Compactor */
     private final Compactor compactor;
-    
-    /** 所有SSTable文件 */
     private final List<Compactor.LeveledSSTable> sstables;
-    
-    /** WAL序列号 */
     private final AtomicLong walSequence;
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
@@ -84,19 +57,13 @@ public class LSMTree {
         this.sstables = new ArrayList<>();
         this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
         
-        // 创建表目录结构
         pathFactory.createTableDirectories(database, table);
         
-        // 初始化活跃内存表
         this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
         
-        // 恢复 WAL 数据（只在有未处理的 WAL 时恢复）
         int recoveredCount = recoverFromWAL();
-        
-        // 加载已有的 SSTable 文件
         loadExistingSSTables();
         
-        // 初始化新的 WAL
         Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
         this.wal = new WriteAheadLog(walPath);
         

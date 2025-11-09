@@ -1,12 +1,16 @@
 package com.mini.paimon.sql;
 
+import com.mini.paimon.catalog.*;
+import com.mini.paimon.metadata.DataType;
+import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableManager;
-import com.mini.paimon.storage.LSMTree;
+import com.mini.paimon.table.*;
 import com.mini.paimon.utils.PathFactory;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * SQL 示例类
@@ -19,20 +23,22 @@ public class SQLSelectTest {
             // 创建路径工厂
             PathFactory pathFactory = new PathFactory("./warehouse");
             
-            // 创建表管理器
-            TableManager tableManager = new TableManager(pathFactory);
-            
+            // 创建 Catalog
+            CatalogContext context = CatalogContext.builder().warehouse("./warehouse").build();
+            Catalog catalog = new FileSystemCatalog("default", context);
+
+            catalog.createDatabase("default", true);
             // 创建 SQL 解析器
-            SQLParser sqlParser = new SQLParser(tableManager, pathFactory);
+            SQLParser sqlParser = new SQLParser(catalog, pathFactory);
             
             // 先创建表
             System.out.println("1. 创建表:");
-            String createTableSQL = "CREATE TABLE users (id INT , name VARCHAR(50), age INT)";
+            String createTableSQL = "CREATE TABLE users (id INT NOT NULL, name VARCHAR(50), age INT)";
             sqlParser.executeSQL(createTableSQL);
             
             // 插入数据但不立即关闭LSMTree
             System.out.println("\n2. 插入数据:");
-            insertDataWithoutClosing(pathFactory, tableManager);
+            insertDataWithoutClosing(pathFactory, catalog);
             
             // 查询表
             System.out.println("\n3. 查询表:");
@@ -48,26 +54,18 @@ public class SQLSelectTest {
     /**
      * 插入数据但不立即关闭LSMTree，以避免多次刷写
      */
-    private static void insertDataWithoutClosing(PathFactory pathFactory, TableManager tableManager) throws IOException {
-        // 获取表的Schema
-        Schema schema = tableManager.getSchemaManager("default", "users").getCurrentSchema();
+    private static void insertDataWithoutClosing(PathFactory pathFactory, Catalog catalog) throws IOException {
+        Table table = catalog.getTable(new Identifier("default", "users"));
         
-        // 创建LSMTree实例
-        LSMTree lsmTree = new LSMTree(schema, pathFactory, "default", "users");
-        
-        try {
-            // 插入数据
-            lsmTree.put(new Row(new Object[]{1, "Alice", 25}));
+        try (TableWrite writer = table.newWrite()) {
+            writer.write(new Row(new Object[]{1, "Alice", 25}));
             System.out.println("插入数据: (1, 'Alice', 25)");
             
-            lsmTree.put(new Row(new Object[]{2, "Bob", 30}));
+            writer.write(new Row(new Object[]{2, "Bob", 30}));
             System.out.println("插入数据: (2, 'Bob', 30)");
             
-            lsmTree.put(new Row(new Object[]{3, "Charlie", 35}));
+            writer.write(new Row(new Object[]{3, "Charlie", 35}));
             System.out.println("插入数据: (3, 'Charlie', 35)");
-        } finally {
-            // 最后关闭LSMTree，触发一次刷写
-            lsmTree.close();
         }
     }
 }

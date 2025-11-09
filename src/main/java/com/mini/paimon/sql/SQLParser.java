@@ -8,17 +8,15 @@ import com.alibaba.druid.sql.ast.statement.*;
 import com.alibaba.druid.sql.parser.SQLParserUtils;
 import com.alibaba.druid.sql.parser.SQLStatementParser;
 import com.alibaba.druid.util.JdbcConstants;
+import com.mini.paimon.catalog.Catalog;
+import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.metadata.DataType;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.TableManager;
-import com.mini.paimon.storage.LSMTree;
-import com.mini.paimon.table.DataTableRead;
-import com.mini.paimon.table.DataTableScan;
-import com.mini.paimon.table.Predicate;
-import com.mini.paimon.table.Projection;
-import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.snapshot.Snapshot;
+import com.mini.paimon.table.*;
+import com.mini.paimon.utils.PathFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -31,11 +29,11 @@ import java.util.List;
  */
 public class SQLParser {
     
-    private final TableManager tableManager;
+    private final Catalog catalog;
     private final PathFactory pathFactory;
     
-    public SQLParser(TableManager tableManager, PathFactory pathFactory) {
-        this.tableManager = tableManager;
+    public SQLParser(Catalog catalog, PathFactory pathFactory) {
+        this.catalog = catalog;
         this.pathFactory = pathFactory;
     }
     
@@ -125,7 +123,8 @@ public class SQLParser {
         }
         
         // 创建表
-        tableManager.createTable("default", tableName, fields, primaryKeys, new ArrayList<>());
+        Identifier identifier = new Identifier("default", tableName);
+        catalog.createTable(identifier, new Schema(0, fields, primaryKeys), true);
         
         System.out.println("Table '" + tableName + "' created successfully.");
     }
@@ -140,8 +139,8 @@ public class SQLParser {
         String tableName = stmt.getTableName().getSimpleName();
         
         // 获取表的 Schema
-        Schema schema = tableManager.getSchemaManager("default", tableName)
-                                   .getCurrentSchema();
+        Identifier identifier = new Identifier("default", tableName);
+        Schema schema = catalog.getTableSchema(identifier);
         
         if (schema == null) {
             throw new IOException("Table '" + tableName + "' not found");
@@ -186,7 +185,6 @@ public class SQLParser {
         // 构造数据行
         Object[] rowValues = new Object[fields.size()];
         
-        // 按指定列名填充
         for (int i = 0; i < fields.size(); i++) {
             Field field = fields.get(i);
             int columnIndex = columnNames.indexOf(field.getName());
@@ -194,18 +192,24 @@ public class SQLParser {
                 SQLExpr valueExpr = valueExprs.get(columnIndex);
                 rowValues[i] = convertValue(valueExpr, field.getType());
             } else {
-                // 未指定的列使用默认值或 null
                 rowValues[i] = null;
             }
         }
         
-        // 创建 LSMTree 并插入数据
-        LSMTree lsmTree = new LSMTree(schema, pathFactory, "default", tableName);
-        Row row = new Row(rowValues);
-        lsmTree.put(row);
-        lsmTree.close(); // 关闭以触发刷写
-        
-        System.out.println("Data inserted into table '" + tableName + "' successfully.");
+        com.mini.paimon.table.Table table = catalog.getTable(new Identifier("default", tableName));
+        try (TableWrite tableWrite = new TableWrite(table, 1000)) {
+            Row row = new Row(rowValues);
+            tableWrite.write(row);
+            TableWrite.TableCommitMessage commitMessage = tableWrite.prepareCommit();
+            
+            TableCommit tableCommit = new TableCommit(catalog, pathFactory, 
+                new Identifier("default", tableName));
+            tableCommit.commit(commitMessage, Snapshot.CommitKind.APPEND);
+            
+            System.out.println("Data inserted into table '" + tableName + "' successfully.");
+        } catch (Exception e) {
+            throw new IOException("Failed to insert data: " + e.getMessage(), e);
+        }
     }
     
     /**
@@ -233,8 +237,8 @@ public class SQLParser {
         String tableName = tableSource.getExpr().toString();
         
         // 2. 获取表的 Schema
-        Schema schema = tableManager.getSchemaManager("default", tableName)
-                                   .getCurrentSchema();
+        Identifier identifier = new Identifier("default", tableName);
+        Schema schema = catalog.getTableSchema(identifier);
         
         if (schema == null) {
             throw new IOException("Table '" + tableName + "' not found");

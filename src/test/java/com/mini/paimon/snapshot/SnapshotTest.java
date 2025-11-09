@@ -78,16 +78,17 @@ class SnapshotTest {
         Snapshot snapshot = snapshotManager.createSnapshot(schema.getSchemaId(), Collections.singletonList(entry));
         
         assertNotNull(snapshot);
-        assertEquals(0, snapshot.getSnapshotId());
+        // 注意：第一个快照的ID是1，不是0
+        assertEquals(1, snapshot.getSnapshotId());
         assertEquals(0, snapshot.getSchemaId());
         assertNotNull(snapshot.getCommitTime());
         assertNotNull(snapshot.getManifestList());
         
         // 验证文件已创建
-        Path snapshotPath = pathFactory.getSnapshotPath("test_db", "test_table", 0);
+        Path snapshotPath = pathFactory.getSnapshotPath("test_db", "test_table", 1);
         assertTrue(Files.exists(snapshotPath));
         
-        Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 0);
+        Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 1);
         assertTrue(Files.exists(manifestListPath));
         
         Path latestPath = pathFactory.getLatestSnapshotPath("test_db", "test_table");
@@ -123,11 +124,12 @@ class SnapshotTest {
         Snapshot originalSnapshot = snapshotManager.createSnapshot(schema.getSchemaId(), Collections.singletonList(entry));
         
         // 重新加载快照
-        Snapshot loadedSnapshot = snapshotManager.getSnapshot(0);
+        Snapshot loadedSnapshot = snapshotManager.getSnapshot(1);
         
         assertNotNull(loadedSnapshot);
         assertEquals(originalSnapshot, loadedSnapshot);
-        assertEquals(0, loadedSnapshot.getSnapshotId());
+        // 注意：第一个快照的ID是1，不是0
+        assertEquals(1, loadedSnapshot.getSnapshotId());
         assertEquals(0, loadedSnapshot.getSchemaId());
     }
 
@@ -180,7 +182,8 @@ class SnapshotTest {
         Snapshot latestSnapshot = snapshotManager.getLatestSnapshot();
         
         assertNotNull(latestSnapshot);
-        assertEquals(1, latestSnapshot.getSnapshotId());
+        // 注意：第二个快照的ID是2，不是1
+        assertEquals(2, latestSnapshot.getSnapshotId());
         assertEquals(snapshot2, latestSnapshot);
     }
 

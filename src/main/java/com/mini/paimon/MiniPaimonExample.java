@@ -1,21 +1,23 @@
 package com.mini.paimon;
 
+import com.mini.paimon.catalog.*;
 import com.mini.paimon.metadata.DataType;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.table.*;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
-import com.mini.paimon.storage.LSMTree;
 
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * Mini Paimon 完整示例
@@ -25,44 +27,46 @@ public class MiniPaimonExample {
     public static void main(String[] args) throws IOException {
         System.out.println("=== Mini Paimon 完整示例 ===");
         
-        // 阶段一：基础设施搭建
         System.out.println("\n1. 基础设施搭建");
         String warehousePath = Paths.get("./warehouse").toAbsolutePath().toString();
         PathFactory pathFactory = new PathFactory(warehousePath);
-        pathFactory.createTableDirectories("example_db", "user_table");
         
-        // 创建表结构
         Field idField = new Field("id", DataType.INT, false);
         Field nameField = new Field("name", DataType.STRING, true);
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), Collections.singletonList("id"));
         
         System.out.println("创建表结构: " + schema);
         
-        // 阶段二：LSM Tree 存储引擎
-        System.out.println("\n2. LSM Tree 存储引擎");
-        LSMTree lsmTree = new LSMTree(schema, pathFactory, "example_db", "user_table");
+        CatalogHelper catalogHelper = new CatalogHelper(pathFactory, warehousePath, "example_db");
+        catalogHelper.createTableIfNotExists("user_table", schema.getFields(), schema.getPrimaryKeys());
         
-        // 插入数据
+        System.out.println("\n2. Table 操作（使用新 API）");
+        Table table = catalogHelper.getTable("user_table");
+        
         Row row1 = new Row(new Object[]{1, "Alice"});
         Row row2 = new Row(new Object[]{2, "Bob"});
         Row row3 = new Row(new Object[]{3, "Charlie"});
         
-        lsmTree.put(row1);
-        lsmTree.put(row2);
-        lsmTree.put(row3);
-        System.out.println("插入数据: " + row1);
-        System.out.println("插入数据: " + row2);
-        System.out.println("插入数据: " + row3);
+        // 使用 newWrite() 写入数据
+        try (TableWrite writer = table.newWrite()) {
+            writer.write(row1);
+            writer.write(row2);
+            writer.write(row3);
+            System.out.println("插入数据: " + row1);
+            System.out.println("插入数据: " + row2);
+            System.out.println("插入数据: " + row3);
+        }
         
-        // 查询数据
-        RowKey key1 = RowKey.fromRow(row1, schema);
-        RowKey key2 = RowKey.fromRow(row2, schema);
-        Row retrievedRow1 = lsmTree.get(key1);
-        Row retrievedRow2 = lsmTree.get(key2);
-        System.out.println("查询数据 (id=1): " + retrievedRow1);
-        System.out.println("查询数据 (id=2): " + retrievedRow2);
+        // 使用 newScan() 和 newRead() 查询数据
+        TableScan scan = table.newScan().withLatestSnapshot();
+        TableScan.Plan plan = scan.plan();
+        TableRead reader = table.newRead();
+        List<Row> allRows = reader.read(plan);
+        System.out.println("查询所有数据: " + allRows.size() + " 条记录");
+        for (Row row : allRows) {
+            System.out.println("  - " + row);
+        }
         
-        // 阶段三：Snapshot 机制
         System.out.println("\n3. Snapshot 机制");
         SnapshotManager snapshotManager = new SnapshotManager(pathFactory, "example_db", "user_table");
         
@@ -144,16 +148,13 @@ public class MiniPaimonExample {
         Snapshot snapshot2 = snapshotManager.createSnapshot(schema.getSchemaId(), Arrays.asList(entry3, entry4));
         System.out.println("创建快照 2: " + snapshot2.getSnapshotId());
         
-        // 获取最新快照
         Snapshot latestSnapshot = snapshotManager.getLatestSnapshot();
         System.out.println("最新快照: " + latestSnapshot.getSnapshotId());
         
-        // 获取所有活跃文件
         System.out.println("活跃文件数量: " + snapshotManager.getActiveFiles().size());
         
-        // 关闭 LSM Tree（会触发最终的数据刷写和快照创建）
-        lsmTree.close();
-        System.out.println("关闭 LSM Tree");
+        catalogHelper.close();
+        System.out.println("关闭 Catalog");
         
         System.out.println("\n=== Mini Paimon 示例完成 ===");
         
