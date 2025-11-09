@@ -632,12 +632,13 @@ public class SQLParser {
         table.partitionManager().dropPartition(partitionSpec);
         
         // 创建新快照记录分区删除
-        TableCommit tableCommit = new TableCommit(catalog, pathFactory, table.identifier());
-        TableWrite.TableCommitMessage commitMessage = new TableWrite.TableCommitMessage(
-            table.identifier().getDatabase(), 
-            table.identifier().getTable(), 
-            table.schema().getSchemaId());
-        tableCommit.commit(commitMessage, Snapshot.CommitKind.OVERWRITE);
+        // 使用 TableWrite 的标准流程，创建空的 commit message（表示删除）
+        try (TableWrite writer = table.newWrite()) {
+            // 不写入任何数据，prepareCommit 会生成空的文件列表
+            TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
+            TableCommit tableCommit = table.newCommit();
+            tableCommit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
+        }
     }
     
     /**

@@ -424,10 +424,41 @@ public class FileSystemCatalog implements Catalog {
                 throw new CatalogException.TableNotExistException(identifier);
             }
             
-            // 持久化快照
-            snapshot.persist(pathFactory, identifier.getDatabase(), identifier.getTable());
+            String database = identifier.getDatabase();
+            String table = identifier.getTable();
+            long snapshotId = snapshot.getId();
             
-            logger.info("Committed snapshot {} for table {}", snapshot.getId(), identifier);
+            // 原子性提交快照：
+            // 1. 写入 Snapshot 文件
+            // 2. 更新 LATEST 指针
+            // 3. 更新 EARLIEST 指针（如果需要）
+            //
+            // 如果任何步骤失败，整个操作失败，保证一致性
+            
+            // 步骤 1：写入 Snapshot 文件
+            snapshot.writeToFile(pathFactory, database, table);
+            
+            try {
+                // 步骤 2：更新 LATEST 指针
+                Snapshot.updateLatestSnapshot(pathFactory, database, table, snapshotId);
+                
+                // 步骤 3：更新 EARLIEST 指针（首次提交时）
+                Snapshot.updateEarliestSnapshot(pathFactory, database, table, snapshotId);
+                
+                logger.info("Committed snapshot {} for table {} atomically", snapshotId, identifier);
+                
+            } catch (IOException e) {
+                // 如果更新指针失败，尝试删除已写入的 Snapshot 文件（回滚）
+                logger.error("Failed to update snapshot pointers, rolling back snapshot {}", snapshotId, e);
+                try {
+                    Path snapshotPath = pathFactory.getSnapshotPath(database, table, snapshotId);
+                    Files.deleteIfExists(snapshotPath);
+                    logger.info("Rolled back snapshot file: {}", snapshotPath);
+                } catch (IOException rollbackError) {
+                    logger.error("Failed to rollback snapshot file", rollbackError);
+                }
+                throw new CatalogException("Failed to commit snapshot atomically for table: " + identifier, e);
+            }
             
         } catch (IOException e) {
             throw new CatalogException("Failed to commit snapshot for table: " + identifier, e);

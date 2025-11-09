@@ -195,51 +195,78 @@ public class Snapshot {
     }
 
     /**
-     * 持久化快照
+     * 持久化快照（仅写入文件，不更新指针）
+     * 
+     * 注意：
+     * - 此方法仅负责写入 Snapshot 文件
+     * - LATEST 和 EARLIEST 指针由 Catalog 层面原子性地更新
+     * - 这样设计保证了原子性：如果任何步骤失败，Catalog 可以回滚
+     * 
+     * @param pathFactory 路径工厂
+     * @param database 数据库名
+     * @param table 表名
+     * @throws IOException 序列化异常
+     * 
+     * @deprecated 使用 {@link #writeToFile(PathFactory, String, String)} 更明确
+     */
+    @Deprecated
+    public void persist(PathFactory pathFactory, String database, String table) throws IOException {
+        writeToFile(pathFactory, database, table);
+    }
+    
+    /**
+     * 将快照写入文件（不更新指针）
+     * 
+     * 这是一个低级 API，仅负责写入快照文件。
+     * 正常情况下应该通过 Catalog.commitSnapshot() 来提交快照。
      * 
      * @param pathFactory 路径工厂
      * @param database 数据库名
      * @param table 表名
      * @throws IOException 序列化异常
      */
-    public void persist(PathFactory pathFactory, String database, String table) throws IOException {
+    public void writeToFile(PathFactory pathFactory, String database, String table) throws IOException {
         Path snapshotPath = pathFactory.getSnapshotPath(database, table, id);
         Files.createDirectories(snapshotPath.getParent());
         SerializationUtils.writeToFile(snapshotPath, this);
-        
-        // 更新 LATEST 指针
-        updateLatestSnapshot(pathFactory, database, table);
-        
-        // 更新 EARLIEST 指针（如果不存在）
-        updateEarliestSnapshot(pathFactory, database, table);
     }
 
     /**
      * 更新最新快照指针（LATEST）
      * 
+     * 此方法应该由 Catalog 层面调用，保证原子性。
+     * 
      * @param pathFactory 路径工厂
      * @param database 数据库名
      * @param table 表名
+     * @param snapshotId 快照 ID
      * @throws IOException IO异常
      */
-    private void updateLatestSnapshot(PathFactory pathFactory, String database, String table) throws IOException {
+    public static void updateLatestSnapshot(PathFactory pathFactory, String database, 
+                                           String table, long snapshotId) throws IOException {
         Path latestPath = pathFactory.getLatestSnapshotPath(database, table);
-        Files.write(latestPath, String.valueOf(id).getBytes());
+        Files.createDirectories(latestPath.getParent());
+        Files.write(latestPath, String.valueOf(snapshotId).getBytes());
     }
     
     /**
      * 更新最早快照指针（EARLIEST）
      * 只在首次创建快照时更新
      * 
+     * 此方法应该由 Catalog 层面调用，保证原子性。
+     * 
      * @param pathFactory 路径工厂
      * @param database 数据库名
      * @param table 表名
+     * @param snapshotId 快照 ID
      * @throws IOException IO异常
      */
-    private void updateEarliestSnapshot(PathFactory pathFactory, String database, String table) throws IOException {
+    public static void updateEarliestSnapshot(PathFactory pathFactory, String database, 
+                                             String table, long snapshotId) throws IOException {
         Path earliestPath = pathFactory.getEarliestSnapshotPath(database, table);
         if (!Files.exists(earliestPath)) {
-            Files.write(earliestPath, String.valueOf(id).getBytes());
+            Files.createDirectories(earliestPath.getParent());
+            Files.write(earliestPath, String.valueOf(snapshotId).getBytes());
         }
     }
 
