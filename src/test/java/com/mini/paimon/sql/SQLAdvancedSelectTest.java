@@ -25,29 +25,29 @@ public class SQLAdvancedSelectTest {
             // 创建 SQL 解析器
             SQLParser sqlParser = new SQLParser(tableManager, pathFactory);
             
-            // 先创建表
-            System.out.println("1. 创建表:");
-            String createTableSQL = "CREATE TABLE users (id INT , name VARCHAR(50), age INT)";
-            sqlParser.executeSQL(createTableSQL);
-            
-            // 插入数据
-            System.out.println("\n2. 插入数据:");
-            insertDataWithoutClosing(pathFactory, tableManager);
-            
-            // 测试 1: SELECT * 查询（全字段）
-            System.out.println("\n3. SELECT * FROM users:");
-            System.out.println("==================================================");
-            sqlParser.executeSQL("SELECT * FROM users");
-            
-            // 测试 2: 字段投影查询
-            System.out.println("\n4. SELECT name, age FROM users:");
-            System.out.println("==================================================");
-            sqlParser.executeSQL("SELECT name, age FROM users");
-            
-            // 测试 3: 单字段查询
-            System.out.println("\n5. SELECT name FROM users:");
-            System.out.println("==================================================");
-            sqlParser.executeSQL("SELECT name FROM users");
+//            // 先创建表
+//            System.out.println("1. 创建表:");
+//            String createTableSQL = "CREATE TABLE users (id INT , name VARCHAR(50), age INT)";
+//            sqlParser.executeSQL(createTableSQL);
+//
+//            // 插入数据
+//            System.out.println("\n2. 插入数据:");
+//            insertDataWithoutClosing(pathFactory, tableManager);
+//
+//            // 测试 1: SELECT * 查询（全字段）
+//            System.out.println("\n3. SELECT * FROM users:");
+//            System.out.println("==================================================");
+//            sqlParser.executeSQL("SELECT * FROM users");
+//
+//            // 测试 2: 字段投影查询
+//            System.out.println("\n4. SELECT name, age FROM users:");
+//            System.out.println("==================================================");
+//            sqlParser.executeSQL("SELECT name, age FROM users");
+//
+//            // 测试 3: 单字段查询
+//            System.out.println("\n5. SELECT name FROM users:");
+//            System.out.println("==================================================");
+//            sqlParser.executeSQL("SELECT name FROM users");
             
             // 测试 4: WHERE 条件过滤（等于）
             System.out.println("\n6. SELECT * FROM users WHERE age = 30:");

@@ -68,10 +68,17 @@ public class PathFactory {
     }
 
     /**
-     * 获取最新Snapshot标记文件路径
+     * 获取最新Snapshot标记文件路径（LATEST）
      */
     public Path getLatestSnapshotPath(String database, String table) {
         return getSnapshotDir(database, table).resolve("LATEST");
+    }
+    
+    /**
+     * 获取最早Snapshot标记文件路径（EARLIEST）
+     */
+    public Path getEarliestSnapshotPath(String database, String table) {
+        return getSnapshotDir(database, table).resolve("EARLIEST");
     }
 
     /**

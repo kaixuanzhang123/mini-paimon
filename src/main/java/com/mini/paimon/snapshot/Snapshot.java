@@ -1,6 +1,7 @@
 package com.mini.paimon.snapshot;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.utils.SerializationUtils;
@@ -9,50 +10,188 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Objects;
 
 /**
- * 快照
- * 表示表在某个时间点的状态
+ * Snapshot
+ * 参考 Apache Paimon 的 Snapshot 设计
+ * 
+ * 每次提交生成一个快照文件，快照版本从 1 开始且必须连续
+ * Snapshot 文件为 JSON 格式，包含提交的元信息和 Manifest 引用
+ * 
+ * 核心字段：
+ * - version: 快照文件版本
+ * - id: 快照 ID（同文件名）
+ * - schemaId: 对应的 Schema 版本
+ * - baseManifestList: 记录从之前快照开始的所有变更
+ * - deltaManifestList: 记录本次快照的新变更
+ * - commitUser: 提交用户标识
+ * - commitIdentifier: 事务标识符
+ * - commitKind: 提交类型（APPEND/COMPACT/OVERWRITE）
+ * - timeMillis: 提交时间戳
+ * - totalRecordCount: 快照中所有变更的记录数
+ * - deltaRecordCount: 本次快照新增变更的记录数
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
-    /** 快照ID */
-    private final long snapshotId;
+    /** 快照文件版本 */
+    private final int version;
+    
+    /** 快照 ID（同文件名）*/
+    private final long id;
     
     /** Schema ID */
     private final int schemaId;
     
-    /** 提交时间 */
-    private final Instant commitTime;
+    /** Base Manifest List 文件名（记录从之前快照开始的所有变更）*/
+    private final String baseManifestList;
     
-    /** Manifest List 文件路径 */
-    private final String manifestList;
-
-    @JsonCreator
-    public Snapshot(
-            @JsonProperty("snapshotId") long snapshotId,
-            @JsonProperty("schemaId") int schemaId,
-            @JsonProperty("commitTime") Instant commitTime,
-            @JsonProperty("manifestList") String manifestList) {
-        this.snapshotId = snapshotId;
-        this.schemaId = schemaId;
-        this.commitTime = commitTime != null ? commitTime : Instant.now();
-        this.manifestList = manifestList;
+    /** Delta Manifest List 文件名（记录本次快照的新变更）*/
+    private final String deltaManifestList;
+    
+    /** 提交用户标识（用于流式写入恢复）*/
+    private final String commitUser;
+    
+    /** 提交标识符（事务 ID）*/
+    private final long commitIdentifier;
+    
+    /** 提交类型 */
+    private final CommitKind commitKind;
+    
+    /** 提交时间（毫秒时间戳）*/
+    private final long timeMillis;
+    
+    /** 快照中所有变更的总记录数 */
+    private final long totalRecordCount;
+    
+    /** 本次快照新增变更的记录数 */
+    private final long deltaRecordCount;
+    
+    /**
+     * 提交类型枚举
+     * 参考 Paimon 的 CommitKind 设计
+     */
+    public enum CommitKind {
+        /** 追加数据 */
+        APPEND,
+        
+        /** 压缩 */
+        COMPACT,
+        
+        /** 覆盖写入 */
+        OVERWRITE,
+        
+        /** 分析/统计 */
+        ANALYZE
     }
 
+    /**
+     * 完整构造函数
+     */
+    @JsonCreator
+    public Snapshot(
+            @JsonProperty("version") int version,
+            @JsonProperty("id") long id,
+            @JsonProperty("schemaId") int schemaId,
+            @JsonProperty("baseManifestList") String baseManifestList,
+            @JsonProperty("deltaManifestList") String deltaManifestList,
+            @JsonProperty("commitUser") String commitUser,
+            @JsonProperty("commitIdentifier") long commitIdentifier,
+            @JsonProperty("commitKind") CommitKind commitKind,
+            @JsonProperty("timeMillis") long timeMillis,
+            @JsonProperty("totalRecordCount") long totalRecordCount,
+            @JsonProperty("deltaRecordCount") long deltaRecordCount) {
+        this.version = version;
+        this.id = id;
+        this.schemaId = schemaId;
+        this.baseManifestList = baseManifestList;
+        this.deltaManifestList = deltaManifestList;
+        this.commitUser = commitUser;
+        this.commitIdentifier = commitIdentifier;
+        this.commitKind = commitKind;
+        this.timeMillis = timeMillis;
+        this.totalRecordCount = totalRecordCount;
+        this.deltaRecordCount = deltaRecordCount;
+    }
+    
+    /**
+     * 简化构造函数（用于简单场景）
+     * 
+     * @deprecated 建议使用 Builder 模式
+     */
+    @Deprecated
+    public Snapshot(long id, int schemaId, String manifestList) {
+        this(3, id, schemaId, manifestList, manifestList, 
+             "system", id, CommitKind.APPEND, 
+             System.currentTimeMillis(), 0, 0);
+    }
+
+    public int getVersion() {
+        return version;
+    }
+    
+    public long getId() {
+        return id;
+    }
+    
+    /**
+     * @deprecated 使用 getId()
+     */
+    @Deprecated
     public long getSnapshotId() {
-        return snapshotId;
+        return id;
     }
 
     public int getSchemaId() {
         return schemaId;
     }
-
-    public Instant getCommitTime() {
-        return commitTime;
+    
+    public String getBaseManifestList() {
+        return baseManifestList;
     }
-
+    
+    public String getDeltaManifestList() {
+        return deltaManifestList;
+    }
+    
+    /**
+     * @deprecated 使用 getBaseManifestList() 或 getDeltaManifestList()
+     */
+    @Deprecated
     public String getManifestList() {
-        return manifestList;
+        return baseManifestList;
+    }
+    
+    public String getCommitUser() {
+        return commitUser;
+    }
+    
+    public long getCommitIdentifier() {
+        return commitIdentifier;
+    }
+    
+    public CommitKind getCommitKind() {
+        return commitKind;
+    }
+    
+    public long getTimeMillis() {
+        return timeMillis;
+    }
+    
+    /**
+     * @deprecated 使用 getTimeMillis()
+     */
+    @Deprecated
+    public Instant getCommitTime() {
+        return Instant.ofEpochMilli(timeMillis);
+    }
+    
+    public long getTotalRecordCount() {
+        return totalRecordCount;
+    }
+    
+    public long getDeltaRecordCount() {
+        return deltaRecordCount;
     }
 
     /**
@@ -64,16 +203,19 @@ public class Snapshot {
      * @throws IOException 序列化异常
      */
     public void persist(PathFactory pathFactory, String database, String table) throws IOException {
-        Path snapshotPath = pathFactory.getSnapshotPath(database, table, snapshotId);
+        Path snapshotPath = pathFactory.getSnapshotPath(database, table, id);
         Files.createDirectories(snapshotPath.getParent());
         SerializationUtils.writeToFile(snapshotPath, this);
         
-        // 同时更新 LATEST 指针
+        // 更新 LATEST 指针
         updateLatestSnapshot(pathFactory, database, table);
+        
+        // 更新 EARLIEST 指针（如果不存在）
+        updateEarliestSnapshot(pathFactory, database, table);
     }
 
     /**
-     * 更新最新快照指针
+     * 更新最新快照指针（LATEST）
      * 
      * @param pathFactory 路径工厂
      * @param database 数据库名
@@ -82,7 +224,23 @@ public class Snapshot {
      */
     private void updateLatestSnapshot(PathFactory pathFactory, String database, String table) throws IOException {
         Path latestPath = pathFactory.getLatestSnapshotPath(database, table);
-        Files.write(latestPath, String.valueOf(snapshotId).getBytes());
+        Files.write(latestPath, String.valueOf(id).getBytes());
+    }
+    
+    /**
+     * 更新最早快照指针（EARLIEST）
+     * 只在首次创建快照时更新
+     * 
+     * @param pathFactory 路径工厂
+     * @param database 数据库名
+     * @param table 表名
+     * @throws IOException IO异常
+     */
+    private void updateEarliestSnapshot(PathFactory pathFactory, String database, String table) throws IOException {
+        Path earliestPath = pathFactory.getEarliestSnapshotPath(database, table);
+        if (!Files.exists(earliestPath)) {
+            Files.write(earliestPath, String.valueOf(id).getBytes());
+        }
     }
 
     /**
@@ -163,31 +321,129 @@ public class Snapshot {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        
         Snapshot snapshot = (Snapshot) o;
-        
-        if (snapshotId != snapshot.snapshotId) return false;
-        if (schemaId != snapshot.schemaId) return false;
-        if (!commitTime.equals(snapshot.commitTime)) return false;
-        return manifestList.equals(snapshot.manifestList);
+        return version == snapshot.version &&
+                id == snapshot.id &&
+                schemaId == snapshot.schemaId &&
+                commitIdentifier == snapshot.commitIdentifier &&
+                timeMillis == snapshot.timeMillis &&
+                totalRecordCount == snapshot.totalRecordCount &&
+                deltaRecordCount == snapshot.deltaRecordCount &&
+                Objects.equals(baseManifestList, snapshot.baseManifestList) &&
+                Objects.equals(deltaManifestList, snapshot.deltaManifestList) &&
+                Objects.equals(commitUser, snapshot.commitUser) &&
+                commitKind == snapshot.commitKind;
     }
 
     @Override
     public int hashCode() {
-        int result = (int) (snapshotId ^ (snapshotId >>> 32));
-        result = 31 * result + schemaId;
-        result = 31 * result + commitTime.hashCode();
-        result = 31 * result + manifestList.hashCode();
-        return result;
+        return Objects.hash(version, id, schemaId, baseManifestList, deltaManifestList,
+                commitUser, commitIdentifier, commitKind, timeMillis,
+                totalRecordCount, deltaRecordCount);
     }
 
     @Override
     public String toString() {
         return "Snapshot{" +
-                "snapshotId=" + snapshotId +
+                "version=" + version +
+                ", id=" + id +
                 ", schemaId=" + schemaId +
-                ", commitTime=" + commitTime +
-                ", manifestList='" + manifestList + '\'' +
+                ", baseManifestList='" + baseManifestList + '\'' +
+                ", deltaManifestList='" + deltaManifestList + '\'' +
+                ", commitUser='" + commitUser + '\'' +
+                ", commitIdentifier=" + commitIdentifier +
+                ", commitKind=" + commitKind +
+                ", timeMillis=" + timeMillis +
+                ", totalRecordCount=" + totalRecordCount +
+                ", deltaRecordCount=" + deltaRecordCount +
                 '}';
+    }
+    
+    /**
+     * Snapshot Builder
+     * 用于构建 Snapshot 对象的建造者模式
+     */
+    public static class Builder {
+        private int version = 3; // 当前版本为 3
+        private long id;
+        private int schemaId;
+        private String baseManifestList;
+        private String deltaManifestList;
+        private String commitUser = "system";
+        private long commitIdentifier;
+        private CommitKind commitKind = CommitKind.APPEND;
+        private long timeMillis = System.currentTimeMillis();
+        private long totalRecordCount = 0;
+        private long deltaRecordCount = 0;
+        
+        public Builder() {}
+        
+        public Builder version(int version) {
+            this.version = version;
+            return this;
+        }
+        
+        public Builder id(long id) {
+            this.id = id;
+            return this;
+        }
+        
+        public Builder schemaId(int schemaId) {
+            this.schemaId = schemaId;
+            return this;
+        }
+        
+        public Builder baseManifestList(String baseManifestList) {
+            this.baseManifestList = baseManifestList;
+            return this;
+        }
+        
+        public Builder deltaManifestList(String deltaManifestList) {
+            this.deltaManifestList = deltaManifestList;
+            return this;
+        }
+        
+        public Builder commitUser(String commitUser) {
+            this.commitUser = commitUser;
+            return this;
+        }
+        
+        public Builder commitIdentifier(long commitIdentifier) {
+            this.commitIdentifier = commitIdentifier;
+            return this;
+        }
+        
+        public Builder commitKind(CommitKind commitKind) {
+            this.commitKind = commitKind;
+            return this;
+        }
+        
+        public Builder timeMillis(long timeMillis) {
+            this.timeMillis = timeMillis;
+            return this;
+        }
+        
+        public Builder totalRecordCount(long totalRecordCount) {
+            this.totalRecordCount = totalRecordCount;
+            return this;
+        }
+        
+        public Builder deltaRecordCount(long deltaRecordCount) {
+            this.deltaRecordCount = deltaRecordCount;
+            return this;
+        }
+        
+        public Snapshot build() {
+            // 如果 baseManifestList 为空，使用 deltaManifestList
+            if (baseManifestList == null && deltaManifestList != null) {
+                baseManifestList = deltaManifestList;
+            }
+            
+            return new Snapshot(
+                version, id, schemaId, baseManifestList, deltaManifestList,
+                commitUser, commitIdentifier, commitKind, timeMillis,
+                totalRecordCount, deltaRecordCount
+            );
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.mini.paimon.snapshot;
 
 import com.mini.paimon.manifest.ManifestEntry;
+import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.metadata.DataType;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.RowKey;
@@ -54,14 +55,23 @@ class SnapshotTest {
         Field idField = new Field("id", DataType.INT, false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta = new DataFileMeta(
+            "./data/data-0-001.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 1}),
+            new RowKey(new byte[]{0, 0, 0, 10}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
         // 创建 Manifest 条目
         ManifestEntry entry = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-001.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            fileMeta
         );
         
         // 创建快照
@@ -90,14 +100,23 @@ class SnapshotTest {
         Field idField = new Field("id", DataType.INT, false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta = new DataFileMeta(
+            "./data/data-0-001.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 1}),
+            new RowKey(new byte[]{0, 0, 0, 10}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
         // 创建 Manifest 条目
         ManifestEntry entry = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-001.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            fileMeta
         );
         
         // 创建快照
@@ -118,23 +137,40 @@ class SnapshotTest {
         Field idField = new Field("id", DataType.INT, false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
-        // 创建多个快照
-        ManifestEntry entry1 = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta1 = new DataFileMeta(
             "./data/data-0-001.sst",
-            0,
+            1024,
+            100,
             new RowKey(new byte[]{0, 0, 0, 1}),
             new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        DataFileMeta fileMeta2 = new DataFileMeta(
+            "./data/data-0-002.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 11}),
+            new RowKey(new byte[]{0, 0, 0, 20}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
+        // 创建 Manifest 条目
+        ManifestEntry entry1 = new ManifestEntry(
+            ManifestEntry.FileKind.ADD,
+            0,
+            fileMeta1
         );
         
         ManifestEntry entry2 = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-002.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 11}),
-            new RowKey(new byte[]{0, 0, 0, 20}),
-            100
+            fileMeta2
         );
         
         Snapshot snapshot1 = snapshotManager.createSnapshot(schema.getSchemaId(), Collections.singletonList(entry1));
@@ -156,14 +192,23 @@ class SnapshotTest {
         Field idField = new Field("id", DataType.INT, false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta = new DataFileMeta(
+            "./data/data-0-001.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 1}),
+            new RowKey(new byte[]{0, 0, 0, 10}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
         // 创建 Manifest 条目
         ManifestEntry entry = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-001.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            fileMeta
         );
         
         // 创建快照
@@ -180,14 +225,23 @@ class SnapshotTest {
         Field idField = new Field("id", DataType.INT, false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
+        // 创建 DataFileMeta
+        DataFileMeta fileMeta = new DataFileMeta(
+            "./data/data-0-001.sst",
+            1024,
+            100,
+            new RowKey(new byte[]{0, 0, 0, 1}),
+            new RowKey(new byte[]{0, 0, 0, 10}),
+            0,
+            0,
+            System.currentTimeMillis()
+        );
+        
         // 创建 Manifest 条目
         ManifestEntry entry = new ManifestEntry(
             ManifestEntry.FileKind.ADD,
-            "./data/data-0-001.sst",
             0,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, 10}),
-            100
+            fileMeta
         );
         
         // 创建快照
