@@ -1,7 +1,11 @@
 package com.mini.paimon.reader;
 
-import com.mini.paimon.metadata.*;
-import com.mini.paimon.storage.LSMTree;
+import com.mini.paimon.manifest.ManifestEntry;
+import com.mini.paimon.metadata.DataType;
+import com.mini.paimon.metadata.Field;
+import com.mini.paimon.metadata.Row;
+import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.table.DataTableRead;
 import com.mini.paimon.table.DataTableScan;
 import com.mini.paimon.table.Predicate;
@@ -12,105 +16,65 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
- * Record Reader Example
- * 演示新的 RecordReader 架构和优化功能
- * 
- * 优化亮点：
- * 1. Block 级别的懒加载 - 只读取需要的 Block
- * 2. 多层过滤优化 - 文件级、Block 级、行级
- * 3. 谓词和投影下推 - 减少数据传输和处理
- * 4. 流式处理 - 支持大数据集的内存友好处理
+ * RecordReader 使用示例
+ * 演示工业级读取器的多种优化策略
  */
 public class RecordReaderExample {
     private static final Logger logger = LoggerFactory.getLogger(RecordReaderExample.class);
     
-    public static void main(String[] args) throws IOException {
-        logger.info("===== RecordReader 优化示例 =====");
-        
-        // 1. 创建测试 Schema
-        Schema schema = createTestSchema();
-        
-        // 2. 写入测试数据
-        String tablePath = "/tmp/mini-paimon-reader-test";
-        writeTestData(schema, tablePath);
-        
-        // 3. 演示优化读取
-        demonstrateOptimizedRead(schema, tablePath);
-        
-        logger.info("===== 示例完成 =====");
+    public static void main(String[] args) {
+        try {
+            // 准备测试数据
+            Schema schema = createTestSchema();
+            PathFactory pathFactory = new PathFactory("./warehouse");
+            
+            // 场景 1: 全表扫描
+            fullTableScan(schema, pathFactory);
+            
+            // 场景 2: 主键范围查询
+            primaryKeyRangeQuery(schema, pathFactory);
+            
+            // 场景 3: 条件过滤 + 投影
+            filterWithProjection(schema, pathFactory);
+            
+            // 场景 4: 流式处理
+            streamProcessing(schema, pathFactory);
+            
+        } catch (Exception e) {
+            logger.error("执行示例时出错", e);
+        }
     }
     
     /**
      * 创建测试 Schema
      */
     private static Schema createTestSchema() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, false);
-        Field ageField = new Field("age", DataType.INT, true);
-        Field scoreField = new Field("score", DataType.DOUBLE, true);
-        
-        List<Field> fields = Arrays.asList(idField, nameField, ageField, scoreField);
-        List<String> primaryKeys = Arrays.asList("id");
-        
-        return new Schema(1, fields, primaryKeys);
-    }
-    
-    /**
-     * 写入测试数据
-     */
-    private static void writeTestData(Schema schema, String tablePath) throws IOException {
-        logger.info("写入测试数据到: {}", tablePath);
-        
-        PathFactory pathFactory = new PathFactory(tablePath);
-        LSMTree lsmTree = new LSMTree(schema, pathFactory, "default", "test");
-        
-        // 写入 1000 条数据
-        for (int i = 1; i <= 1000; i++) {
-            Object[] values = new Object[]{
-                    i,
-                    "User" + i,
-                    20 + (i % 50),
-                    60.0 + (i % 40)
-            };
-            Row row = new Row(values);
-            lsmTree.put(row);
-        }
-        
-        lsmTree.close();
-        
-        logger.info("写入完成: 1000 条数据");
-    }
-    
-    /**
-     * 演示优化读取
-     */
-    private static void demonstrateOptimizedRead(Schema schema, String tablePath) throws IOException {
-        PathFactory pathFactory = new PathFactory(tablePath);
-        
-        logger.info("\n===== 场景 1: 全表扫描（无过滤） =====");
-        fullTableScan(schema, pathFactory);
-        
-        logger.info("\n===== 场景 2: 主键范围查询（文件级过滤） =====");
-        primaryKeyRangeQuery(schema, pathFactory);
-        
-        logger.info("\n===== 场景 3: 条件过滤 + 投影（多层优化） =====");
-        filterWithProjection(schema, pathFactory);
-        
-        logger.info("\n===== 场景 4: 流式处理大数据集 =====");
-        streamProcessing(schema, pathFactory);
+        return new Schema(
+            0,
+            Arrays.asList(
+                new Field("id", DataType.INT, false),
+                new Field("name", DataType.STRING, false),
+                new Field("age", DataType.INT, true),
+                new Field("score", DataType.DOUBLE, true)
+            ),
+            Collections.singletonList("id")
+        );
     }
     
     /**
      * 场景 1: 全表扫描
+     * 优化点：自动跳过无效文件、Block 级懒加载
      */
     private static void fullTableScan(Schema schema, PathFactory pathFactory) throws IOException {
         DataTableScan scan = new DataTableScan(pathFactory, "default", "test", schema);
         DataTableScan.Plan plan = scan.plan();
         
-        DataTableRead read = new DataTableRead(schema);
+        // 修复：正确初始化DataTableRead，传递所有必需的参数
+        DataTableRead read = new DataTableRead(schema, pathFactory, "default", "test");
         List<Row> rows = read.read(plan);
         
         logger.info("全表扫描结果: {} 条记录", rows.size());
@@ -132,7 +96,8 @@ public class RecordReaderExample {
         RowKey startKey = new RowKey(java.nio.ByteBuffer.allocate(4).putInt(200).array());
         RowKey endKey = new RowKey(java.nio.ByteBuffer.allocate(4).putInt(300).array());
         
-        DataTableRead read = new DataTableRead(schema)
+        // 修复：正确初始化DataTableRead，传递所有必需的参数
+        DataTableRead read = new DataTableRead(schema, pathFactory, "default", "test")
                 .withKeyRange(startKey, endKey);
         
         List<Row> rows = read.read(plan);
@@ -158,7 +123,8 @@ public class RecordReaderExample {
         // 投影：只选择 id, name, age 字段
         Projection projection = Projection.of("id", "name", "age");
         
-        DataTableRead read = new DataTableRead(schema)
+        // 修复：正确初始化DataTableRead，传递所有必需的参数
+        DataTableRead read = new DataTableRead(schema, pathFactory, "default", "test")
                 .withFilter(predicate)
                 .withProjection(projection);
         
@@ -179,7 +145,8 @@ public class RecordReaderExample {
         DataTableScan scan = new DataTableScan(pathFactory, "default", "test", schema);
         DataTableScan.Plan plan = scan.plan();
         
-        DataTableRead read = new DataTableRead(schema);
+        // 修复：正确初始化DataTableRead，传递所有必需的参数
+        DataTableRead read = new DataTableRead(schema, pathFactory, "default", "test");
         
         // 使用流式处理
         final int[] count = {0};

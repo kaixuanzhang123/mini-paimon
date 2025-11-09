@@ -81,12 +81,19 @@ public class ManifestFile {
      * @param pathFactory 路径工厂
      * @param database 数据库名
      * @param table 表名
-     * @param manifestId Manifest ID
+     * @param manifestId Manifest ID 或完整文件名
      * @return Manifest 文件
      * @throws IOException 反序列化异常
      */
     public static ManifestFile load(PathFactory pathFactory, String database, String table, String manifestId) throws IOException {
-        Path manifestPath = pathFactory.getManifestPath(database, table, manifestId);
+        // 如果 manifestId 已经包含 "manifest-" 前缀，直接使用
+        Path manifestPath;
+        if (manifestId.startsWith("manifest-")) {
+            manifestPath = pathFactory.getManifestDir(database, table).resolve(manifestId);
+        } else {
+            manifestPath = pathFactory.getManifestPath(database, table, manifestId);
+        }
+        
         if (!Files.exists(manifestPath)) {
             throw new IOException("Manifest file not found: " + manifestPath);
         }

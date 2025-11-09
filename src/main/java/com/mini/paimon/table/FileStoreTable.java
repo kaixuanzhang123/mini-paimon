@@ -3,6 +3,7 @@ package com.mini.paimon.table;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.partition.PartitionManager;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.utils.PathFactory;
@@ -25,6 +26,7 @@ public class FileStoreTable implements Table {
     private final Schema schema;
     private final PathFactory pathFactory;
     private final SnapshotManager snapshotManager;
+    private final PartitionManager partitionManager;
     
     public FileStoreTable(Catalog catalog, Identifier identifier, Schema schema, PathFactory pathFactory) {
         this.catalog = catalog;
@@ -35,6 +37,12 @@ public class FileStoreTable implements Table {
             pathFactory, 
             identifier.getDatabase(), 
             identifier.getTable()
+        );
+        this.partitionManager = new PartitionManager(
+            pathFactory,
+            identifier.getDatabase(),
+            identifier.getTable(),
+            schema.getPartitionKeys()
         );
         
         logger.debug("Created FileStoreTable for {}", identifier);
@@ -112,6 +120,11 @@ public class FileStoreTable implements Table {
     @Override
     public PathFactory pathFactory() {
         return pathFactory;
+    }
+    
+    @Override
+    public PartitionManager partitionManager() {
+        return partitionManager;
     }
     
     public Catalog catalog() {

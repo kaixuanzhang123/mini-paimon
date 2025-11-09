@@ -221,8 +221,8 @@ public class SnapshotManager {
             .mapToLong(meta -> {
                 try {
                     String manifestFileName = meta.getFileName();
-                    String manifestId = manifestFileName.substring("manifest-".length());
-                    ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
+                    // manifestFileName 已经包含 "manifest-" 前缀，直接使用
+                    ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestFileName);
                     return manifest.getEntries().stream()
                         .filter(e -> e.getKind() == ManifestEntry.FileKind.ADD)
                         .mapToLong(e -> e.getFile().getRowCount())

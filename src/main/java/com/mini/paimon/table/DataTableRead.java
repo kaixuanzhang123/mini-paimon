@@ -8,10 +8,12 @@ import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.reader.FileRecordReader;
 import com.mini.paimon.reader.RecordReader;
 import com.mini.paimon.reader.RecordReaderFactory;
+import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,15 +34,21 @@ public class DataTableRead {
     
     private final Schema schema;
     private final RecordReaderFactory readerFactory;
+    private final PathFactory pathFactory;
+    private final String database;
+    private final String table;
     
     private Projection projection;
     private Predicate predicate;
     private RowKey startKey;
     private RowKey endKey;
     
-    public DataTableRead(Schema schema) {
+    public DataTableRead(Schema schema, PathFactory pathFactory, String database, String table) {
         this.schema = schema;
         this.readerFactory = new RecordReaderFactory(schema);
+        this.pathFactory = pathFactory;
+        this.database = database;
+        this.table = table;
     }
     
     /**
@@ -102,26 +110,30 @@ public class DataTableRead {
         // 遍历所有数据文件
         for (ManifestEntry entry : plan.getDataFiles()) {
             DataFileMeta fileMeta = entry.getFile();
-            String filePath = fileMeta.getFileName();
+            String relativeFilePath = fileMeta.getFileName();
+            
+            // 构建完整文件路径：table目录 + 相对路径（如：dt=2024-01-01/data-0-000.sst）
+            Path fullFilePath = pathFactory.getTablePath(database, table)
+                .resolve(relativeFilePath);
             
             // 优化 1：文件级过滤 - 检查文件是否可能包含符合条件的数据
             if (canSkipFile(fileMeta)) {
                 skippedFiles++;
                 logger.debug("Skipped file: {} (minKey={}, maxKey={})", 
-                            filePath, fileMeta.getMinKey(), fileMeta.getMaxKey());
+                            relativeFilePath, fileMeta.getMinKey(), fileMeta.getMaxKey());
                 continue;
             }
             
             readFiles++;
             logger.debug("Reading file: {} (rows={}, size={})", 
-                        filePath, fileMeta.getRowCount(), fileMeta.getFileSize());
+                        fullFilePath, fileMeta.getRowCount(), fileMeta.getFileSize());
             
             // 优化 2：使用 RecordReader 进行 Block 级别的优化读取
             // RecordReader 内部会：
             // - 懒加载 Block（只读取需要的 Block）
             // - 应用 Block 级过滤（跳过不相关的 Block）
             // - 应用谓词和投影下推
-            try (FileRecordReader reader = factory.createFileReader(filePath)) {
+            try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
                 Row row;
                 while ((row = reader.readRecord()) != null) {
                     result.add(row);
@@ -156,12 +168,17 @@ public class DataTableRead {
         
         for (ManifestEntry entry : plan.getDataFiles()) {
             DataFileMeta fileMeta = entry.getFile();
+            String relativeFilePath = fileMeta.getFileName();
             
             if (canSkipFile(fileMeta)) {
                 continue;
             }
             
-            try (FileRecordReader reader = factory.createFileReader(fileMeta.getFileName())) {
+            // 构建完整文件路径：table目录 + 相对路径
+            Path fullFilePath = pathFactory.getTablePath(database, table)
+                .resolve(relativeFilePath);
+            
+            try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
                 // 批量读取以提高性能
                 RecordReader.RecordBatch<Row> batch;
                 while ((batch = reader.readBatch(1000)) != null) {

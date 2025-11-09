@@ -2,6 +2,7 @@ package com.mini.paimon.sql;
 
 import com.alibaba.druid.sql.ast.SQLDataType;
 import com.alibaba.druid.sql.ast.SQLExpr;
+import com.alibaba.druid.sql.ast.SQLName;
 import com.alibaba.druid.sql.ast.SQLStatement;
 import com.alibaba.druid.sql.ast.expr.*;
 import com.alibaba.druid.sql.ast.statement.*;
@@ -10,17 +11,24 @@ import com.alibaba.druid.sql.parser.SQLStatementParser;
 import com.alibaba.druid.util.JdbcConstants;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
+import com.mini.paimon.exception.CatalogException;
 import com.mini.paimon.metadata.DataType;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
+import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.table.*;
 import com.mini.paimon.utils.PathFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * SQL 解析器
@@ -28,6 +36,7 @@ import java.util.List;
  * 使用 Druid SQL Parser 实现标准 SQL 解析
  */
 public class SQLParser {
+    private static final Logger logger = LoggerFactory.getLogger(SQLParser.class);
     
     private final Catalog catalog;
     private final PathFactory pathFactory;
@@ -59,6 +68,10 @@ public class SQLParser {
             executeInsert((SQLInsertStatement) statement);
         } else if (statement instanceof SQLSelectStatement) {
             executeSelect((SQLSelectStatement) statement);
+        } else if (statement instanceof SQLDeleteStatement) {
+            executeDelete((SQLDeleteStatement) statement);
+        } else if (statement instanceof com.alibaba.druid.sql.ast.statement.SQLDropTableStatement) {
+            executeDropTable((com.alibaba.druid.sql.ast.statement.SQLDropTableStatement) statement);
         } else {
             throw new IllegalArgumentException("Unsupported SQL statement: " + statement.getClass().getSimpleName());
         }
@@ -75,6 +88,7 @@ public class SQLParser {
         
         List<Field> fields = new ArrayList<>();
         List<String> primaryKeys = new ArrayList<>();
+        List<String> partitionKeys = new ArrayList<>();
         
         // 解析列定义
         for (SQLTableElement element : stmt.getTableElementList()) {
@@ -112,6 +126,27 @@ public class SQLParser {
             }
         }
         
+        // 解析 PARTITIONED BY 子句
+        Object partitioning = stmt.getPartitioning();
+        if (partitioning != null) {
+            try {
+                // 使用反射获取 columns
+                java.lang.reflect.Method getColumnsMethod = partitioning.getClass().getMethod("getColumns");
+                @SuppressWarnings("unchecked")
+                List<SQLExpr> columns = (List<SQLExpr>) getColumnsMethod.invoke(partitioning);
+                for (SQLExpr column : columns) {
+                    if (column instanceof SQLIdentifierExpr) {
+                        partitionKeys.add(((SQLIdentifierExpr) column).getName());
+                    } else if (column instanceof SQLName) {
+                        partitionKeys.add(((SQLName) column).getSimpleName());
+                    }
+                }
+            } catch (Exception e) {
+                // 如果解析失败，忽略分区
+                logger.warn("Failed to parse partition keys: {}", e.getMessage());
+            }
+        }
+        
         // 如果没有显式指定主键，但有 NOT NULL 字段，可以将其作为主键（简化处理）
         if (primaryKeys.isEmpty()) {
             for (Field field : fields) {
@@ -124,9 +159,38 @@ public class SQLParser {
         
         // 创建表
         Identifier identifier = new Identifier("default", tableName);
-        catalog.createTable(identifier, new Schema(0, fields, primaryKeys), true);
+        catalog.createTable(identifier, new Schema(0, fields, primaryKeys, partitionKeys), true);
         
         System.out.println("Table '" + tableName + "' created successfully.");
+        if (!partitionKeys.isEmpty()) {
+            System.out.println("Partition keys: " + partitionKeys);
+        }
+    }
+    
+    /**
+     * 解析并执行 DROP TABLE 语句
+     * 删除整个表目录，包括所有数据和元数据
+     * 
+     * @param stmt DROP TABLE 语句
+     * @throws IOException 解析或执行错误
+     */
+    private void executeDropTable(com.alibaba.druid.sql.ast.statement.SQLDropTableStatement stmt) throws IOException {
+        // 获取表名
+        com.alibaba.druid.sql.ast.statement.SQLExprTableSource tableSource = stmt.getTableSources().get(0);
+        String tableName = tableSource.getTableName();
+        
+        Identifier identifier = new Identifier("default", tableName);
+        
+        // 删除表（会删除整个表目录）
+        try {
+            catalog.dropTable(identifier, stmt.isIfExists());
+            System.out.println("Table '" + tableName + "' dropped successfully.");
+        } catch (CatalogException e) {
+            if (!stmt.isIfExists()) {
+                throw new IOException("Failed to drop table: " + e.getMessage(), e);
+            }
+            System.out.println("Table '" + tableName + "' does not exist (ignored).");
+        }
     }
     
     /**
@@ -254,7 +318,8 @@ public class SQLParser {
         DataTableScan tableScan = new DataTableScan(pathFactory, "default", tableName, schema);
         DataTableScan.Plan plan = tableScan.plan();
         
-        DataTableRead tableRead = new DataTableRead(schema);
+        // 修复：正确初始化DataTableRead，传递所有必需的参数
+        DataTableRead tableRead = new DataTableRead(schema, pathFactory, "default", tableName);
         if (projection != null) {
             tableRead.withProjection(projection);
         }
@@ -491,5 +556,176 @@ public class SQLParser {
         }
         
         return convertValue(expr, dataType);
+    }
+    
+    /**
+     * 解析并执行 DELETE 语句
+     * 支持 DELETE FROM table WHERE condition
+     * 参考 Paimon 实现：
+     * - 按分区删除：物理删除分区目录
+     * - 按主键删除：读取数据、过滤后重写
+     * - 无 WHERE 子句：删除所有数据（对于分区表，删除所有分区）
+     * 
+     * @param stmt DELETE 语句
+     * @throws IOException 解析或执行错误
+     */
+    private void executeDelete(SQLDeleteStatement stmt) throws IOException {
+        String tableName = stmt.getTableName().getSimpleName();
+        
+        // 获取表的 Schema
+        Identifier identifier = new Identifier("default", tableName);
+        Schema schema = catalog.getTableSchema(identifier);
+        
+        if (schema == null) {
+            throw new IOException("Table '" + tableName + "' not found");
+        }
+        
+        // 获取表
+        com.mini.paimon.table.Table table = catalog.getTable(identifier);
+        
+        // 解析 WHERE 条件
+        SQLExpr whereExpr = stmt.getWhere();
+        
+        // 如果没有 WHERE 子句，删除所有数据
+        if (whereExpr == null) {
+            deleteAllData(table, schema);
+            return;
+        }
+        
+        // 如果是简单的等值条件 (WHERE field = value)
+        if (whereExpr instanceof SQLBinaryOpExpr) {
+            SQLBinaryOpExpr binaryExpr = (SQLBinaryOpExpr) whereExpr;
+            if (binaryExpr.getOperator() == SQLBinaryOperator.Equality) {
+                String fieldName = extractFieldName(binaryExpr.getLeft());
+                Object value = extractValue(binaryExpr.getRight(), schema, fieldName);
+                
+                // 如果是分区字段，物理删除分区
+                if (schema.getPartitionKeys().contains(fieldName)) {
+                    deletePartition(table, fieldName, value);
+                    System.out.println("Partition deleted: " + fieldName + "=" + value);
+                } else {
+                    // 非分区字段，使用 OVERWRITE 重写数据（删除匹配的行）
+                    deleteByCondition(table, schema, fieldName, value);
+                    System.out.println("Deleted rows where " + fieldName + " = " + value);
+                }
+            } else {
+                throw new IllegalArgumentException(
+                    "Only equality condition is supported in DELETE statement");
+            }
+        } else {
+            throw new IllegalArgumentException(
+                "Unsupported WHERE expression in DELETE: " + whereExpr);
+        }
+    }
+    
+    /**
+     * 删除分区
+     * 参考 Paimon 实现，直接删除分区目录
+     */
+    private void deletePartition(com.mini.paimon.table.Table table, 
+                                 String partitionKey, Object value) throws IOException {
+        Map<String, String> partitionValues = new LinkedHashMap<>();
+        partitionValues.put(partitionKey, value.toString());
+        PartitionSpec partitionSpec = new PartitionSpec(partitionValues);
+        
+        // 物理删除分区目录
+        table.partitionManager().dropPartition(partitionSpec);
+        
+        // 创建新快照记录分区删除
+        TableCommit tableCommit = new TableCommit(catalog, pathFactory, table.identifier());
+        TableWrite.TableCommitMessage commitMessage = new TableWrite.TableCommitMessage(
+            table.identifier().getDatabase(), 
+            table.identifier().getTable(), 
+            table.schema().getSchemaId());
+        tableCommit.commit(commitMessage, Snapshot.CommitKind.OVERWRITE);
+    }
+    
+    /**
+     * 删除所有数据
+     * 对于分区表：删除所有分区目录
+     * 对于非分区表：重写为空表
+     */
+    private void deleteAllData(com.mini.paimon.table.Table table, Schema schema) throws IOException {
+        if (schema.getPartitionKeys().isEmpty()) {
+            // 非分区表：重写为空表
+            try (TableWrite writer = table.newWrite()) {
+                // 不写入任何数据
+                TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
+                TableCommit commit = table.newCommit();
+                commit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
+            }
+            System.out.println("All data deleted from table");
+        } else {
+            // 分区表：删除所有分区
+            List<PartitionSpec> partitions = table.partitionManager().listPartitions();
+            
+            if (partitions.isEmpty()) {
+                System.out.println("No partitions to delete");
+                return;
+            }
+            
+            for (PartitionSpec partition : partitions) {
+                table.partitionManager().dropPartition(partition);
+            }
+            
+            // 创建 OVERWRITE 快照（空的数据文件列表）
+            try (TableWrite writer = table.newWrite()) {
+                // 不写入任何数据，prepareCommit 会收集现有的文件（应该为空）
+                TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
+                TableCommit commit = table.newCommit();
+                commit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
+            }
+            
+            System.out.println("Deleted all " + partitions.size() + " partitions");
+        }
+    }
+    
+    /**
+     * 按条件删除数据
+     * 通过读取所有数据、过滤后重写实现
+     */
+    private void deleteByCondition(com.mini.paimon.table.Table table, 
+                                   Schema schema, String fieldName, Object value) throws IOException {
+        // 1. 读取所有现有数据
+        TableScan scan = table.newScan().withLatestSnapshot();
+        TableScan.Plan plan = scan.plan();
+        TableRead reader = table.newRead();
+        List<Row> allRows = reader.read(plan);
+        
+        // 2. 过滤掉需要删除的行
+        List<Row> remainingRows = new ArrayList<>();
+        int fieldIndex = schema.getFieldIndex(fieldName);
+        
+        if (fieldIndex < 0) {
+            throw new IllegalArgumentException("Field not found: " + fieldName);
+        }
+        
+        for (Row row : allRows) {
+            Object rowValue = row.getValue(fieldIndex);
+            // 保留不匹配的行
+            if (!value.equals(rowValue)) {
+                remainingRows.add(row);
+            }
+        }
+        
+        int deletedCount = allRows.size() - remainingRows.size();
+        
+        if (deletedCount == 0) {
+            System.out.println("No rows matched the condition");
+            return;
+        }
+        
+        // 3. 重写数据（OVERWRITE）
+        try (TableWrite writer = table.newWrite()) {
+            for (Row row : remainingRows) {
+                writer.write(row);
+            }
+            
+            TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
+            TableCommit commit = table.newCommit();
+            commit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
+        }
+        
+        System.out.println(deletedCount + " row(s) deleted");
     }
 }

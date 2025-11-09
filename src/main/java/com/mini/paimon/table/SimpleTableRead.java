@@ -23,7 +23,8 @@ public class SimpleTableRead implements TableRead {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.identifier = identifier;
-        this.delegate = new DataTableRead(schema);
+        this.delegate = new DataTableRead(schema, pathFactory, 
+            identifier.getDatabase(), identifier.getTable());
     }
     
     @Override

@@ -4,6 +4,7 @@ import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
 import com.mini.paimon.manifest.ManifestFileMeta;
 import com.mini.paimon.manifest.ManifestList;
+import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import org.slf4j.Logger;
@@ -16,6 +17,7 @@ import java.util.List;
 
 /**
  * FileStoreTable 扫描器实现
+ * 支持分区过滤
  */
 public class FileStoreTableScan implements TableScan {
     private static final Logger logger = LoggerFactory.getLogger(FileStoreTableScan.class);
@@ -23,6 +25,7 @@ public class FileStoreTableScan implements TableScan {
     private final FileStoreTable table;
     private Long specifiedSnapshotId;
     private boolean useLatest = true;
+    private PartitionSpec partitionFilter;
     
     public FileStoreTableScan(FileStoreTable table) {
         this.table = table;
@@ -39,6 +42,12 @@ public class FileStoreTableScan implements TableScan {
     public TableScan withLatestSnapshot() {
         this.useLatest = true;
         this.specifiedSnapshotId = null;
+        return this;
+    }
+    
+    @Override
+    public TableScan withPartitionFilter(PartitionSpec partitionSpec) {
+        this.partitionFilter = partitionSpec;
         return this;
     }
     
@@ -66,6 +75,11 @@ public class FileStoreTableScan implements TableScan {
         // 读取 Manifest 文件获取数据文件列表
         List<ManifestEntry> files = readManifestFiles(snapshot);
         
+        // 应用分区过滤
+        if (partitionFilter != null) {
+            files = filterByPartition(files);
+        }
+        
         logger.debug("Scanned snapshot {} with {} files", 
             snapshot.getSnapshotId(), files.size());
         
@@ -90,6 +104,7 @@ public class FileStoreTableScan implements TableScan {
         List<ManifestEntry> allEntries = new ArrayList<>();
         for (ManifestFileMeta fileMeta : manifestList.getManifestFiles()) {
             // 加载每个 ManifestFile
+            // fileMeta.getFileName() 已经包含 "manifest-" 前缀
             ManifestFile manifestFile = ManifestFile.load(
                 table.pathFactory(),
                 table.identifier().getDatabase(),
@@ -108,6 +123,30 @@ public class FileStoreTableScan implements TableScan {
         }
         
         return activeFiles;
+    }
+    
+    /**
+     * 按分区过滤文件
+     */
+    private List<ManifestEntry> filterByPartition(List<ManifestEntry> entries) {
+        if (partitionFilter == null || partitionFilter.isEmpty()) {
+            return entries;
+        }
+        
+        List<ManifestEntry> filtered = new ArrayList<>();
+        String partitionPath = partitionFilter.toPath();
+        
+        for (ManifestEntry entry : entries) {
+            // 检查文件路径是否包含分区
+            if (entry.getFileName().contains(partitionPath)) {
+                filtered.add(entry);
+            }
+        }
+        
+        logger.debug("Filtered {} files to {} files for partition {}", 
+            entries.size(), filtered.size(), partitionPath);
+        
+        return filtered;
     }
     
     /**

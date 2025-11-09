@@ -57,7 +57,8 @@ public class TableCommit {
         
         List<ManifestEntry> manifestEntries = collectManifestEntries();
         
-        if (manifestEntries.isEmpty()) {
+        // 对于 OVERWRITE 提交，即使没有数据文件也要创建快照（表示数据被清空）
+        if (manifestEntries.isEmpty() && commitKind != Snapshot.CommitKind.OVERWRITE) {
             logger.warn("No data files to commit");
             return;
         }
@@ -79,22 +80,39 @@ public class TableCommit {
     
     /**
      * 收集 Manifest 条目
+     * 支持分区表：扫描表目录下的所有分区子目录（与 snapshot、manifest 同级）
      */
     private List<ManifestEntry> collectManifestEntries() throws IOException {
         List<ManifestEntry> entries = new ArrayList<>();
         
-        Path dataDir = pathFactory.getDataDir(identifier.getDatabase(), identifier.getTable());
-        if (!Files.exists(dataDir)) {
+        Path tableDir = pathFactory.getTablePath(identifier.getDatabase(), identifier.getTable());
+        if (!Files.exists(tableDir)) {
             return entries;
         }
         
-        try (java.util.stream.Stream<Path> stream = Files.list(dataDir)) {
+        // 递归扫描表目录，查找所有 .sst 文件（包括分区目录）
+        collectSSTFiles(tableDir, tableDir, entries);
+        
+        return entries;
+    }
+    
+    /**
+     * 递归收集 SSTable 文件
+     * @param scanDir 要扫描的目录
+     * @param baseDir 基准目录（用于计算相对路径）
+     * @param entries 收集的条目列表
+     */
+    private void collectSSTFiles(Path scanDir, Path baseDir, List<ManifestEntry> entries) throws IOException {
+        try (java.util.stream.Stream<Path> stream = Files.walk(scanDir)) {
             stream.filter(path -> path.toString().endsWith(".sst"))
                 .forEach(sstPath -> {
                     try {
                         long fileSize = Files.size(sstPath);
+                        // 计算相对于表目录的相对路径
+                        String relativePath = baseDir.relativize(sstPath).toString();
+                        
                         ManifestEntry entry = ManifestEntry.addFile(
-                            sstPath.toString(),
+                            relativePath,  // 使用相对路径，如：dt=2024-01-01/data-0-000.sst
                             fileSize,
                             0,
                             null,
@@ -108,8 +126,6 @@ public class TableCommit {
                     }
                 });
         }
-        
-        return entries;
     }
     
     /**

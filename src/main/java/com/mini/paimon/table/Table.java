@@ -2,6 +2,7 @@ package com.mini.paimon.table;
 
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.partition.PartitionManager;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.utils.PathFactory;
@@ -77,4 +78,9 @@ public interface Table {
      * 获取 PathFactory
      */
     PathFactory pathFactory();
+    
+    /**
+     * 获取 PartitionManager
+     */
+    PartitionManager partitionManager();
 }

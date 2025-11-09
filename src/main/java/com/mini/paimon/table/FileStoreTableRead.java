@@ -4,6 +4,7 @@ import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.snapshot.Snapshot;
+import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,8 +21,8 @@ public class FileStoreTableRead implements TableRead {
     
     private final DataTableRead delegate;
     
-    public FileStoreTableRead(Schema schema) {
-        this.delegate = new DataTableRead(schema);
+    public FileStoreTableRead(Schema schema, PathFactory pathFactory, String database, String table) {
+        this.delegate = new DataTableRead(schema, pathFactory, database, table);
     }
     
     @Override

@@ -30,6 +30,7 @@ public class LSMTree {
     private final String database;
     private final String table;
     private final AtomicLong sequenceGenerator;
+    private final boolean autoSnapshot;  // 是否自动创建快照
     
     private MemTable activeMemTable;
     private MemTable immutableMemTable;
@@ -44,6 +45,10 @@ public class LSMTree {
     private final AtomicLong walSequence;
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
+        this(schema, pathFactory, database, table, true);
+    }
+    
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, boolean autoSnapshot) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
@@ -56,6 +61,7 @@ public class LSMTree {
         this.objectMapper = new ObjectMapper();
         this.sstables = new ArrayList<>();
         this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
+        this.autoSnapshot = autoSnapshot;
         
         pathFactory.createTableDirectories(database, table);
         
@@ -67,8 +73,8 @@ public class LSMTree {
         Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
         this.wal = new WriteAheadLog(walPath);
         
-        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables", 
-                   database, table, recoveredCount, sstables.size());
+        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables, autoSnapshot={}", 
+                   database, table, recoveredCount, sstables.size(), autoSnapshot);
     }
     
     /**
@@ -337,21 +343,24 @@ public class LSMTree {
         );
         sstables.add(sst);
         
-        // 创建 Manifest 条目
-        List<ManifestEntry> manifestEntries = new ArrayList<>();
-        ManifestEntry entry = ManifestEntry.addFile(
-            sstPath,
-            Files.size(java.nio.file.Paths.get(sstPath)),
-            footer.getRowCount(),
-            footer.getMinKey(),
-            footer.getMaxKey(),
-            schema.getSchemaId(),
-            0 // level
-        );
-        manifestEntries.add(entry);
-        
-        // 创建快照
-        snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+        // 只有在自动快照模式下才创建快照
+        if (autoSnapshot) {
+            // 创建 Manifest 条目
+            List<ManifestEntry> manifestEntries = new ArrayList<>();
+            ManifestEntry entry = ManifestEntry.addFile(
+                sstPath,
+                Files.size(java.nio.file.Paths.get(sstPath)),
+                footer.getRowCount(),
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                schema.getSchemaId(),
+                0 // level
+            );
+            manifestEntries.add(entry);
+            
+            // 创建快照
+            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+        }
         
         // 清理不可变内存表
         immutableMemTable = null;
@@ -439,21 +448,24 @@ public class LSMTree {
             );
             sstables.add(sst);
             
-            // 创建 Manifest 条目
-            List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = ManifestEntry.addFile(
-                sstPath,
-                Files.size(java.nio.file.Paths.get(sstPath)),
-                footer.getRowCount(),
-                footer.getMinKey(),
-                footer.getMaxKey(),
-                schema.getSchemaId(),
-                0 // level
-            );
-            manifestEntries.add(entry);
-            
-            // 创建快照
-            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+            // 只在自动快照模式下创建快照
+            if (autoSnapshot) {
+                // 创建 Manifest 条目
+                List<ManifestEntry> manifestEntries = new ArrayList<>();
+                ManifestEntry entry = ManifestEntry.addFile(
+                    sstPath,
+                    Files.size(java.nio.file.Paths.get(sstPath)),
+                    footer.getRowCount(),
+                    footer.getMinKey(),
+                    footer.getMaxKey(),
+                    schema.getSchemaId(),
+                    0 // level
+                );
+                manifestEntries.add(entry);
+                
+                // 创建快照
+                snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+            }
             
             // 删除对应的 WAL 文件（数据已持久化）
             Path currentWalPath = pathFactory.getWalPath(database, table, walSequence.get());
@@ -470,21 +482,24 @@ public class LSMTree {
             String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
             SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
             
-            // 创建 Manifest 条目
-            List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = ManifestEntry.addFile(
-                sstPath,
-                Files.size(java.nio.file.Paths.get(sstPath)),
-                footer.getRowCount(),
-                footer.getMinKey(),
-                footer.getMaxKey(),
-                schema.getSchemaId(),
-                0 // level
-            );
-            manifestEntries.add(entry);
-            
-            // 创建快照
-            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+            // 只在自动快照模式下创建快照
+            if (autoSnapshot) {
+                // 创建 Manifest 条目
+                List<ManifestEntry> manifestEntries = new ArrayList<>();
+                ManifestEntry entry = ManifestEntry.addFile(
+                    sstPath,
+                    Files.size(java.nio.file.Paths.get(sstPath)),
+                    footer.getRowCount(),
+                    footer.getMinKey(),
+                    footer.getMaxKey(),
+                    schema.getSchemaId(),
+                    0 // level
+                );
+                manifestEntries.add(entry);
+                
+                // 创建快照
+                snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
+            }
         }
         
         logger.info("LSMTree closed successfully");
