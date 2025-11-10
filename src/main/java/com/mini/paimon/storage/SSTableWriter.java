@@ -46,10 +46,12 @@ public class SSTableWriter {
      * 
      * @param memTable 内存表
      * @param filePath 文件路径
-     * @return SSTable 元信息
+     * @param schemaId Schema 版本 ID
+     * @param level LSM Tree 层级
+     * @return 数据文件元信息（包含统计信息）
      * @throws IOException 写入异常
      */
-    public SSTable.Footer flush(MemTable memTable, String filePath) throws IOException {
+    public com.mini.paimon.manifest.DataFileMeta flush(MemTable memTable, String filePath, int schemaId, int level) throws IOException {
         logger.info("Flushing MemTable to SSTable: {}", filePath);
         
         // 获取内存表中的所有条目
@@ -93,10 +95,25 @@ public class SSTableWriter {
             // 强制刷新到磁盘
             fileChannel.force(true);
             
+            long fileSize = fileChannel.size();
+            
             logger.info("Successfully flushed MemTable to SSTable with {} entries, {} data blocks", 
                        entries.size(), dataBlocks.size());
             
-            return footer;
+            // 6. 构建 DataFileMeta（包含统计信息，避免后续扫描）
+            // 提取相对路径（去除绝对路径前缀）
+            String fileName = Paths.get(filePath).getFileName().toString();
+            
+            return new com.mini.paimon.manifest.DataFileMeta(
+                fileName,
+                fileSize,
+                entries.size(),
+                footer.getMinKey(),
+                footer.getMaxKey(),
+                schemaId,
+                level,
+                System.currentTimeMillis()
+            );
         }
     }
 

@@ -48,7 +48,7 @@ public class SQLPartitionDeleteExample {
             List<com.mini.paimon.metadata.Field> fields1 = new ArrayList<>();
             fields1.add(new com.mini.paimon.metadata.Field("user_id", com.mini.paimon.metadata.DataType.INT, false));
             fields1.add(new com.mini.paimon.metadata.Field("event_type", com.mini.paimon.metadata.DataType.STRING, true));
-            fields1.add(new com.mini.paimon.metadata.Field("event_time", com.mini.paimon.metadata.DataType.LONG, true));
+            fields1.add(new com.mini.paimon.metadata.Field("event_time", com.mini.paimon.metadata.DataType.INT, true));
             fields1.add(new com.mini.paimon.metadata.Field("dt", com.mini.paimon.metadata.DataType.STRING, false));
 
             List<String> primaryKeys1 = Arrays.asList("user_id");

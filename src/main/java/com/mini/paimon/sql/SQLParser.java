@@ -628,16 +628,70 @@ public class SQLParser {
         partitionValues.put(partitionKey, value.toString());
         PartitionSpec partitionSpec = new PartitionSpec(partitionValues);
         
-        // 物理删除分区目录
+        // 1. 首先读取当前 Snapshot，获取该分区的所有文件
+        List<com.mini.paimon.manifest.ManifestEntry> deleteEntries = new ArrayList<>();
+        
+        if (com.mini.paimon.snapshot.Snapshot.hasLatestSnapshot(pathFactory, 
+                table.identifier().getDatabase(), table.identifier().getTable())) {
+            try {
+                com.mini.paimon.snapshot.Snapshot snapshot = com.mini.paimon.snapshot.Snapshot.loadLatest(
+                    pathFactory, table.identifier().getDatabase(), table.identifier().getTable());
+                
+                com.mini.paimon.manifest.ManifestList manifestList = com.mini.paimon.manifest.ManifestList.load(
+                    pathFactory, table.identifier().getDatabase(), 
+                    table.identifier().getTable(), snapshot.getId());
+                
+                // 遍历所有 manifest files，查找属于该分区的文件
+                String partitionPath = partitionSpec.toPath();
+                for (com.mini.paimon.manifest.ManifestFileMeta manifestMeta : manifestList.getManifestFiles()) {
+                    com.mini.paimon.manifest.ManifestFile manifestFile = com.mini.paimon.manifest.ManifestFile.load(
+                        pathFactory, table.identifier().getDatabase(), 
+                        table.identifier().getTable(), 
+                        manifestMeta.getFileName().substring("manifest-".length()));
+                    
+                    for (com.mini.paimon.manifest.ManifestEntry entry : manifestFile.getEntries()) {
+                        if (entry.getKind() == com.mini.paimon.manifest.ManifestEntry.FileKind.ADD) {
+                            // 检查文件是否属于该分区
+                            String fileName = entry.getFile().getFileName();
+                            if (fileName.startsWith(partitionPath + "/")) {
+                                // 创建 DELETE 条目
+                                com.mini.paimon.manifest.ManifestEntry deleteEntry = 
+                                    com.mini.paimon.manifest.ManifestEntry.deleteFile(
+                                        fileName,
+                                        entry.getFile().getFileSize(),
+                                        entry.getFile().getSchemaId(),
+                                        entry.getMinKey(),
+                                        entry.getMaxKey(),
+                                        entry.getFile().getRowCount(),
+                                        entry.getFile().getLevel()
+                                    );
+                                deleteEntries.add(deleteEntry);
+                            }
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                logger.warn("Failed to load snapshot for partition deletion", e);
+            }
+        }
+        
+        // 2. 物理删除分区目录
         table.partitionManager().dropPartition(partitionSpec);
         
-        // 创建新快照记录分区删除
-        // 使用 TableWrite 的标准流程，创建空的 commit message（表示删除）
-        try (TableWrite writer = table.newWrite()) {
-            // 不写入任何数据，prepareCommit 会生成空的文件列表
-            TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
-            TableCommit tableCommit = table.newCommit();
-            tableCommit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
+        // 3. 创建新快照记录分区删除（使用 APPEND 模式 + DELETE 条目）
+        if (!deleteEntries.isEmpty()) {
+            // 直接创建 Snapshot，包含 DELETE 条目
+            com.mini.paimon.snapshot.SnapshotManager snapshotManager = 
+                new com.mini.paimon.snapshot.SnapshotManager(
+                    pathFactory, table.identifier().getDatabase(), table.identifier().getTable());
+            
+            Schema schema = table.schema();
+            com.mini.paimon.snapshot.Snapshot snapshot = snapshotManager.createSnapshot(
+                schema.getSchemaId(), deleteEntries, 
+                com.mini.paimon.snapshot.Snapshot.CommitKind.APPEND);
+            
+            // 关键：通过 Catalog 提交 Snapshot，更新 latest snapshot 指针
+            catalog.commitSnapshot(table.identifier(), snapshot);
         }
     }
     
@@ -665,6 +719,7 @@ public class SQLParser {
                 return;
             }
             
+            // 物理删除分区目录
             for (PartitionSpec partition : partitions) {
                 table.partitionManager().dropPartition(partition);
             }
@@ -716,17 +771,46 @@ public class SQLParser {
             return;
         }
         
-        // 3. 重写数据（OVERWRITE）
+        // 3. OVERWRITE 模式：清空 WAL 文件，避免新创建的 LSMTree 从 WAL 恢复旧数据
+        cleanupWALFiles(table);
+        
+        // 4. 重写数据（OVERWRITE）
         try (TableWrite writer = table.newWrite()) {
             for (Row row : remainingRows) {
                 writer.write(row);
             }
             
             TableWrite.TableCommitMessage commitMsg = writer.prepareCommit();
+            
             TableCommit commit = table.newCommit();
             commit.commit(commitMsg, Snapshot.CommitKind.OVERWRITE);
         }
         
         System.out.println(deletedCount + " row(s) deleted");
+    }
+    
+    /**
+     * 清空 WAL 文件
+     * 在 OVERWRITE 提交前调用，避免 WAL 恢复导致数据重复
+     */
+    private void cleanupWALFiles(com.mini.paimon.table.Table table) throws IOException {
+        try {
+            java.nio.file.Path walDir = pathFactory.getWalDir(table.identifier().getDatabase(), 
+                                               table.identifier().getTable());
+            if (java.nio.file.Files.exists(walDir)) {
+                try (java.util.stream.Stream<java.nio.file.Path> stream = java.nio.file.Files.walk(walDir)) {
+                    stream.filter(path -> path.toString().endsWith(".log"))
+                          .forEach(path -> {
+                              try {
+                                  java.nio.file.Files.deleteIfExists(path);
+                              } catch (IOException e) {
+                                  logger.warn("Failed to delete WAL file: " + path, e);
+                              }
+                          });
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to cleanup WAL files", e);
+        }
     }
 }

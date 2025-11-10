@@ -5,7 +5,9 @@ import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.partition.BucketSpec;
 import com.mini.paimon.partition.PartitionSpec;
+import com.mini.paimon.storage.BucketedLSMTree;
 import com.mini.paimon.storage.LSMTree;
 import com.mini.paimon.storage.PartitionedLSMTree;
 import com.mini.paimon.storage.SSTable;
@@ -36,6 +38,9 @@ public class TableWrite implements AutoCloseable {
     /** 提交标识符生成器 */
     private static final AtomicLong COMMIT_IDENTIFIER_GENERATOR = new AtomicLong(System.currentTimeMillis());
     
+    /** 全局 SSTable 序列号生成器（跨 TableWrite 实例共享，避免文件名冲突） */
+    private static final AtomicLong GLOBAL_SEQUENCE_GENERATOR = new AtomicLong(System.currentTimeMillis());
+    
     private final Table table;
     private final Schema schema;
     private final String database;
@@ -43,11 +48,14 @@ public class TableWrite implements AutoCloseable {
     private final int batchSize;
     private final List<String> partitionKeys;
     
+    // Bucket 配置（默认 4 个 bucket）
+    private final int totalBuckets;
+    
     // 非分区表使用单个 LSMTree
     private LSMTree nonPartitionedLsmTree;
     
-    // 分区表：每个分区使用独立的 LSMTree
-    private final Map<PartitionSpec, LSMTree> partitionedLsmTrees;
+    // 分区表 + Bucket：每个（分区，Bucket）组合使用独立的 LSMTree
+    private final Map<String, LSMTree> bucketedLsmTrees;  // Key: partition_path + "#bucket-" + bucket_id
     
     // 缓冲区：按分区组织数据
     private final Map<PartitionSpec, List<Row>> partitionBuffers;
@@ -64,26 +72,27 @@ public class TableWrite implements AutoCloseable {
         this.tableName = table.identifier().getTable();
         this.batchSize = batchSize;
         this.partitionKeys = schema.getPartitionKeys();
+        this.totalBuckets = 4;  // 默认 4 个 bucket
         
         if (partitionKeys.isEmpty()) {
             // 非分区表：使用单个 LSMTree
             this.nonPartitionedLsmTree = new LSMTree(schema, table.pathFactory(), database, tableName);
-            this.partitionedLsmTrees = null;
+            this.bucketedLsmTrees = null;
             this.partitionBuffers = null;
             logger.debug("Created TableWrite for non-partitioned table {}.{}", database, tableName);
         } else {
-            // 分区表：为每个分区创建独立的 LSMTree
+            // 分区表 + Bucket：为每个（分区，Bucket）组合创建独立的 LSMTree
             this.nonPartitionedLsmTree = null;
-            this.partitionedLsmTrees = new ConcurrentHashMap<>();
+            this.bucketedLsmTrees = new ConcurrentHashMap<>();
             this.partitionBuffers = new ConcurrentHashMap<>();
-            logger.debug("Created TableWrite for partitioned table {}.{}, partition keys: {}", 
-                database, tableName, partitionKeys);
+            logger.debug("Created TableWrite for partitioned table {}.{}, partition keys: {}, buckets: {}", 
+                database, tableName, partitionKeys, totalBuckets);
         }
     }
     
     /**
      * 写入单行数据
-     * 如果是分区表，数据写入到对应分区目录
+     * 分区表自动根据主键计算 Bucket，实现并行写入
      */
     public void write(Row row) throws IOException {
         validateRow(row);
@@ -92,17 +101,20 @@ public class TableWrite implements AutoCloseable {
             // 非分区表：直接写入
             nonPartitionedLsmTree.put(row);
         } else {
-            // 分区表：按分区写入
+            // 分区表：按分区 + Bucket 写入
             PartitionSpec partitionSpec = extractPartitionSpec(row);
+            
+            // 计算 Bucket：根据主键 hash 分配
+            int bucket = computeBucket(row);
             
             // 创建分区目录
             table.partitionManager().createPartition(partitionSpec);
             
-            // 获取或创建该分区的 LSMTree
-            LSMTree partitionLsmTree = getOrCreatePartitionLsmTree(partitionSpec);
+            // 获取或创建该（分区，Bucket）的 LSMTree
+            LSMTree lsmTree = getOrCreateBucketLsmTree(partitionSpec, bucket);
             
             // 写入数据
-            partitionLsmTree.put(row);
+            lsmTree.put(row);
             
             // 添加到缓冲区用于批量管理
             partitionBuffers.computeIfAbsent(partitionSpec, k -> new ArrayList<>()).add(row);
@@ -163,18 +175,21 @@ public class TableWrite implements AutoCloseable {
                 // 非分区表
                 if (nonPartitionedLsmTree != null) {
                     logger.debug("Flushing non-partitioned table data");
-                    collectFilesFromLSMTree(nonPartitionedLsmTree, null, newFiles);
+                    // 关键：先 close() 刷盘，再收集文件
                     nonPartitionedLsmTree.close();
+                    collectFilesFromLSMTree(nonPartitionedLsmTree, null, newFiles);
                 }
             } else {
-                // 分区表
-                for (Map.Entry<PartitionSpec, LSMTree> entry : partitionedLsmTrees.entrySet()) {
-                    PartitionSpec partitionSpec = entry.getKey();
+                // 分区表 + Bucket
+                for (Map.Entry<String, LSMTree> entry : bucketedLsmTrees.entrySet()) {
+                    String key = entry.getKey();  // 格式：dt=2024-01-01#bucket-0
                     LSMTree lsmTree = entry.getValue();
                     
-                    logger.debug("Flushing partition {} to disk", partitionSpec.toPath());
-                    collectFilesFromLSMTree(lsmTree, partitionSpec, newFiles);
+                    logger.debug("Flushing partition+bucket {} to disk", key);
+                    // 关键：先 close() 刷盘，再收集文件
                     lsmTree.close();
+                    // 传递完整的 key（包含 bucket 信息）
+                    collectFilesFromLSMTree(lsmTree, key, newFiles);
                 }
             }
             
@@ -213,110 +228,61 @@ public class TableWrite implements AutoCloseable {
     /**
      * 从 LSMTree 收集已刷盘的 SSTable 文件信息
      * 
+     * 性能优化：不再扫描文件目录，直接从 LSMTree 获取写入时维护的元信息
+     * 
      * @param lsmTree LSM Tree 实例
-     * @param partitionSpec 分区规范（非分区表为 null）
+     * @param partitionPath 分区路径（非分区表为 null）
      * @param manifestEntries 输出的 Manifest 条目列表
      */
     private void collectFilesFromLSMTree(
             LSMTree lsmTree, 
-            PartitionSpec partitionSpec, 
+            String partitionPath, 
             List<ManifestEntry> manifestEntries) throws IOException {
         
-        // 扫描数据目录，获取所有 SSTable 文件
+        // 性能优化：直接从 LSMTree 获取写入时维护的文件元信息
+        // 避免扫描目录和读取文件内容
+        List<DataFileMeta> pendingFiles = lsmTree.getPendingFiles();
+        
         Path tableDir = table.pathFactory().getTablePath(database, tableName);
-        Path scanDir = partitionSpec == null ? tableDir : tableDir.resolve(partitionSpec.toPath());
         
-        if (!Files.exists(scanDir)) {
-            logger.debug("Data directory does not exist: {}", scanDir);
-            return;
-        }
-        
-        // SSTableReader 用于读取文件元信息
-        SSTableReader reader = new SSTableReader();
-        
-        // 递归查找所有 .sst 文件
-        try (java.util.stream.Stream<Path> stream = Files.walk(scanDir)) {
-            stream.filter(path -> path.toString().endsWith(".sst"))
-                .forEach(sstPath -> {
-                    try {
-                        // 计算相对路径
-                        String relativePath = tableDir.relativize(sstPath).toString();
-                        
-                        // 获取文件大小
-                        long fileSize = Files.size(sstPath);
-                        
-                        // 从文件名中解析 level（如：data-0-123.sst）
-                        int level = parseLevelFromFilename(sstPath.getFileName().toString());
-                        
-                        // 使用 SSTableReader 扫描文件获取统计信息
-                        // 简化实现：直接扫描文件获取 min/max key 和 row count
-                        List<Row> rows = reader.scan(sstPath.toString());
-                        
-                        RowKey minKey = null;
-                        RowKey maxKey = null;
-                        long rowCount = rows.size();
-                        
-                        // 计算 min/max key
-                        if (!rows.isEmpty() && schema.hasPrimaryKey()) {
-                            for (Row row : rows) {
-                                RowKey rowKey = RowKey.fromRow(row, schema);
-                                if (minKey == null || rowKey.compareTo(minKey) < 0) {
-                                    minKey = rowKey;
-                                }
-                                if (maxKey == null || rowKey.compareTo(maxKey) > 0) {
-                                    maxKey = rowKey;
-                                }
-                            }
-                        }
-                        
-                        // 创建 DataFileMeta
-                        DataFileMeta fileMeta = new DataFileMeta(
-                            relativePath,
-                            fileSize,
-                            rowCount,
-                            minKey,
-                            maxKey,
-                            schema.getSchemaId(),
-                            level,
-                            System.currentTimeMillis()
-                        );
-                        
-                        // 创建 ManifestEntry（ADD 类型）
-                        ManifestEntry entry = new ManifestEntry(
-                            ManifestEntry.FileKind.ADD,
-                            0,  // bucket（简化实现，默认为 0）
-                            fileMeta
-                        );
-                        
-                        manifestEntries.add(entry);
-                        
-                        logger.debug("Collected file: {}, size: {}, rows: {}, level: {}",
-                            relativePath, fileSize, rowCount, level);
-                            
-                    } catch (IOException e) {
-                        logger.warn("Failed to process SSTable file: {}", sstPath, e);
-                    }
-                });
-        }
-    }
-    
-    /**
-     * 从文件名中解析层级
-     * 文件名格式：data-{level}-{sequence}.sst
-     */
-    private int parseLevelFromFilename(String filename) {
-        try {
-            // 移除 .sst 后缀
-            String nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
-            // 分割 "data-0-123" 为 ["data", "0", "123"]
-            String[] parts = nameWithoutExt.split("-");
-            if (parts.length >= 2) {
-                return Integer.parseInt(parts[1]);
+        for (DataFileMeta fileMeta : pendingFiles) {
+            // 计算相对路径：对于分区表，需要加上分区前缀
+            // partitionPath 格式如：dt=2024-01-01#bucket-0 或 dt=2024-01-01
+            String relativePath;
+            if (partitionPath != null && !partitionPath.isEmpty()) {
+                // 分区表：路径形如 dt=2024-01-01/bucket-0/data-0-001.sst
+                // partitionPath 可能包含 bucket 信息，需要处理
+                String actualPath = partitionPath.replace("#", "/");
+                relativePath = actualPath + "/" + fileMeta.getFileName();
+            } else {
+                // 非分区表：路径形如 data/data-0-001.sst
+                relativePath = "data/" + fileMeta.getFileName();
             }
-        } catch (Exception e) {
-            logger.warn("Failed to parse level from filename: {}", filename, e);
+            
+            // 创建新的 DataFileMeta，使用相对路径
+            DataFileMeta relativeFileMeta = new DataFileMeta(
+                relativePath,
+                fileMeta.getFileSize(),
+                fileMeta.getRowCount(),
+                fileMeta.getMinKey(),
+                fileMeta.getMaxKey(),
+                fileMeta.getSchemaId(),
+                fileMeta.getLevel(),
+                fileMeta.getCreationTime()
+            );
+            
+            // 创建 ManifestEntry（ADD 类型）
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                0,  // bucket（当前默认为 0）
+                relativeFileMeta
+            );
+            
+            manifestEntries.add(entry);
+            
+            logger.debug("Collected file: {}, size: {}, rows: {}, level: {}",
+                relativePath, fileMeta.getFileSize(), fileMeta.getRowCount(), fileMeta.getLevel());
         }
-        return 0; // 默认为 Level 0
     }
     
     /**
@@ -331,20 +297,13 @@ public class TableWrite implements AutoCloseable {
         logger.info("Aborting write operation for table {}.{}", database, tableName);
         
         try {
-            // 关闭所有 LSMTree
-            if (partitionKeys.isEmpty()) {
-                if (nonPartitionedLsmTree != null) {
-                    nonPartitionedLsmTree.close();
-                }
-            } else {
-                for (LSMTree lsmTree : partitionedLsmTrees.values()) {
-                    try {
-                        lsmTree.close();
-                    } catch (Exception e) {
-                        logger.warn("Failed to close LSMTree during abort", e);
-                    }
-                }
-            }
+            // 关键逻辑：
+            // 1. 如果已经 prepare 过，LSMTree 已经被 close()，不需要再次关闭
+            // 2. 如果没有 prepare 过，需要关闭 LSMTree 以清理资源
+            // 3. 但是，由于 prepareCommit() 已经调用了 close()，在 close() 时会刷写数据，
+            //    如果再次关闭会导致数据被重复写入
+            // 因此，abort() 不应该再次调用 LSMTree.close()
+            // 只清理状态即可
             
             // 清理状态
             prepared = false;
@@ -394,7 +353,7 @@ public class TableWrite implements AutoCloseable {
             if (partitionKeys.isEmpty()) {
                 nonPartitionedLsmTree = null;
             } else {
-                partitionedLsmTrees.clear();
+                bucketedLsmTrees.clear();
                 partitionBuffers.clear();
             }
             
@@ -429,18 +388,42 @@ public class TableWrite implements AutoCloseable {
     }
     
     /**
-     * 获取或创建分区的 LSMTree
-     * 每个分区使用独立的数据目录
+     * 根据行主键计算 Bucket
+     * 使用 hash 分配策略，确保相同主键的数据分配到同一个 bucket
      */
-    private LSMTree getOrCreatePartitionLsmTree(PartitionSpec partitionSpec) throws IOException {
-        return partitionedLsmTrees.computeIfAbsent(partitionSpec, spec -> {
+    private int computeBucket(Row row) {
+        if (!schema.hasPrimaryKey()) {
+            // 无主键表：轮询分配到不同 bucket
+            return (int)(System.nanoTime() % totalBuckets);
+        }
+        
+        // 有主键表：根据主键 hash 分配
+        RowKey rowKey = RowKey.fromRow(row, schema);
+        return BucketSpec.computeBucket(rowKey.getBytes(), totalBuckets);
+    }
+    
+    /**
+     * 获取或创建（分区 + Bucket）的 LSMTree
+     * 每个（分区，Bucket）组合使用独立的数据目录
+     */
+    private LSMTree getOrCreateBucketLsmTree(PartitionSpec partitionSpec, int bucket) throws IOException {
+        // 生成唯一 key：partition_path#bucket-N
+        String key = partitionSpec.toPath() + "#bucket-" + bucket;
+        
+        return bucketedLsmTrees.computeIfAbsent(key, k -> {
             try {
-                // 创建分区专属的 LSMTree
-                // 使用分区路径作为子目录
-                return new PartitionedLSMTree(schema, table.pathFactory(), 
-                    database, tableName, spec);
+                // 创建 Bucket 专属的 LSMTree
+                return new BucketedLSMTree(
+                    schema, 
+                    table.pathFactory(), 
+                    database, 
+                    tableName, 
+                    partitionSpec,
+                    bucket,
+                    totalBuckets
+                );
             } catch (IOException e) {
-                throw new RuntimeException("Failed to create LSMTree for partition " + spec, e);
+                throw new RuntimeException("Failed to create BucketedLSMTree for " + k, e);
             }
         });
     }

@@ -13,6 +13,10 @@ import java.nio.file.Paths;
  * 分区 LSMTree
  * 继承 LSMTree，将数据写入到指定的分区目录
  * 参考 Paimon 实现，每个分区有独立的数据目录
+ * 
+ * 目录结构：
+ * - 数据文件：table/dt=2024-01-01/*.sst
+ * - WAL 文件：table/wal/wal-*.log（表级 WAL 目录）
  */
 public class PartitionedLSMTree extends LSMTree {
     
@@ -70,9 +74,8 @@ public class PartitionedLSMTree extends LSMTree {
         
         @Override
         public Path getWalDir(String database, String table) {
-            // WAL 也按分区存储在分区目录下
-            Path tableDir = delegate.getTablePath(database, table);
-            return tableDir.resolve(partitionPath).resolve("wal");
+            // WAL 是表级别的，不是分区级别（与 Paimon 对齐）
+            return delegate.getWalDir(database, table);
         }
         
         @Override
@@ -84,15 +87,15 @@ public class PartitionedLSMTree extends LSMTree {
         
         @Override
         public Path getWalPath(String database, String table, long sequence) {
-            Path walDir = getWalDir(database, table);
-            return walDir.resolve(String.format("wal-%03d.log", sequence));
+            // WAL 文件使用表级目录
+            return delegate.getWalPath(database, table, sequence);
         }
         
         @Override
         public void createTableDirectories(String database, String table) throws IOException {
-            // 创建分区目录结构
+            // 只创建分区数据目录，WAL 目录由表级统一管理
             Files.createDirectories(getDataDir(database, table));
-            Files.createDirectories(getWalDir(database, table));
+            // 不再创建分区级的 WAL 目录
         }
         
         // 其他方法委托给原始 PathFactory

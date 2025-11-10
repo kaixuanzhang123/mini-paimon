@@ -117,4 +117,23 @@ public class ManifestEntry {
         );
         return new ManifestEntry(FileKind.ADD, 0, fileMeta);
     }
+    
+    /**
+     * 创建 DELETE 类型的 ManifestEntry
+     * 用于 OVERWRITE 模式下标记旧文件为已删除
+     */
+    public static ManifestEntry deleteFile(
+            String fileName,
+            long fileSize,
+            int schemaId,
+            RowKey minKey,
+            RowKey maxKey,
+            long rowCount,
+            int level) {
+        DataFileMeta fileMeta = new DataFileMeta(
+            fileName, fileSize, rowCount, minKey, maxKey,
+            schemaId, level, System.currentTimeMillis()
+        );
+        return new ManifestEntry(FileKind.DELETE, 0, fileMeta);
+    }
 }

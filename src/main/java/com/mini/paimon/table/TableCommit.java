@@ -5,6 +5,9 @@ import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.exception.CatalogException;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
+import com.mini.paimon.manifest.ManifestFileMeta;
+import com.mini.paimon.manifest.ManifestList;
+import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.utils.IdGenerator;
@@ -105,26 +108,71 @@ public class TableCommit {
             validateCommitMessage(commitMessage);
             
             // 3. 获取新文件列表
-            List<ManifestEntry> manifestEntries = commitMessage.getNewFiles();
+            List<ManifestEntry> manifestEntries = new ArrayList<>(commitMessage.getNewFiles());
             
-            // 4. 对于 OVERWRITE 提交，即使没有数据文件也要创建快照（表示数据被清空）
+            // 4. 对于 OVERWRITE 提交，需要标记所有旧文件为已删除
+            if (commitKind == Snapshot.CommitKind.OVERWRITE) {
+                // 获取上一个快照的所有文件
+                if (Snapshot.hasLatestSnapshot(pathFactory, identifier.getDatabase(), identifier.getTable())) {
+                    try {
+                        Snapshot previousSnapshot = Snapshot.loadLatest(pathFactory, 
+                            identifier.getDatabase(), identifier.getTable());
+                        
+                        // 读取上一个快照的 manifest list
+                        ManifestList previousManifestList = ManifestList.load(
+                            pathFactory, identifier.getDatabase(), identifier.getTable(), 
+                            previousSnapshot.getId());
+                        
+                        // 遍历所有 manifest files，收集所有的 ADD 文件
+                        for (ManifestFileMeta manifestMeta : previousManifestList.getManifestFiles()) {
+                            ManifestFile manifestFile = ManifestFile.load(
+                                pathFactory, identifier.getDatabase(), identifier.getTable(), 
+                                manifestMeta.getFileName());
+                            
+                            for (ManifestEntry oldEntry : manifestFile.getEntries()) {
+                                // 只处理之前是 ADD 的文件，标记为 DELETE
+                                if (oldEntry.getKind() == ManifestEntry.FileKind.ADD) {
+                                    ManifestEntry deleteEntry = ManifestEntry.deleteFile(
+                                        oldEntry.getFile().getFileName(),
+                                        oldEntry.getFile().getFileSize(),
+                                        oldEntry.getFile().getSchemaId(),
+                                        oldEntry.getMinKey(),
+                                        oldEntry.getMaxKey(),
+                                        oldEntry.getFile().getRowCount(),
+                                        oldEntry.getFile().getLevel()
+                                    );
+                                    manifestEntries.add(deleteEntry);
+                                }
+                            }
+                        }
+                        
+                        logger.info("OVERWRITE mode: marked {} old files as DELETE", 
+                            manifestEntries.size() - commitMessage.getNewFiles().size());
+                        
+                    } catch (IOException e) {
+                        logger.warn("Failed to load previous snapshot for OVERWRITE", e);
+                    }
+                }
+            }
+            
+            // 5. 对于 OVERWRITE 提交，即使没有数据文件也要创建快照（表示数据被清空）
             if (manifestEntries.isEmpty() && commitKind != Snapshot.CommitKind.OVERWRITE) {
                 logger.warn("No data files to commit for table {}", identifier);
                 return;
             }
             
-            // 5. 创建 Snapshot
+            // 6. 创建 Snapshot
             Snapshot snapshot = snapshotManager.createSnapshot(
                 commitMessage.getSchemaId(), 
                 manifestEntries, 
                 commitKind
             );
             
-            // 6. 原子性提交到 Catalog
+            // 7. 原子性提交到 Catalog
             try {
                 catalog.commitSnapshot(identifier, snapshot);
                 
-                // 7. 更新成功提交的 commitIdentifier
+                // 8. 更新成功提交的 commitIdentifier
                 lastCommittedIdentifier = commitMessage.getCommitIdentifier();
                 
                 long duration = System.currentTimeMillis() - startTime;

@@ -216,15 +216,21 @@ public class Compactor {
     private LeveledSSTable flushToLevel(MemTable memTable, int level) throws IOException {
         String path = pathFactory.getSSTPath(database, table, level, 
                                             memTable.getSequenceNumber()).toString();
-        SSTable.Footer footer = writer.flush(memTable, path);
+        // 使用新的 flush 方法，直接返回 DataFileMeta
+        com.mini.paimon.manifest.DataFileMeta fileMeta = writer.flush(
+            memTable, 
+            path, 
+            schema.getSchemaId(), 
+            level
+        );
         
         return new LeveledSSTable(
             path,
             level,
-            footer.getMinKey(),
-            footer.getMaxKey(),
-            Files.size(Paths.get(path)),
-            footer.getRowCount()
+            fileMeta.getMinKey(),
+            fileMeta.getMaxKey(),
+            fileMeta.getFileSize(),
+            fileMeta.getRowCount()
         );
     }
     

@@ -130,6 +130,42 @@ public class PathFactory {
         return getDataDir(database, table).resolve(
                 String.format("data-%d-%03d.sst", level, sequence));
     }
+    
+    /**
+     * 获取带 Bucket 的 SSTable 文件路径
+     * 用于分区表的 Bucket 机制
+     * 
+     * @param database 数据库名
+     * @param table 表名
+     * @param partitionPath 分区路径（如：dt=2024-01-01）
+     * @param bucket Bucket ID
+     * @param level LSM Tree 层级
+     * @param sequence 序列号
+     * @return SSTable 文件路径（如：table/dt=2024-01-01/bucket-0/data-0-001.sst）
+     */
+    public Path getSSTPathWithBucket(String database, String table, String partitionPath, 
+                                    int bucket, int level, long sequence) {
+        Path tablePath = getTablePath(database, table);
+        return tablePath
+            .resolve(partitionPath)
+            .resolve("bucket-" + bucket)
+            .resolve(String.format("data-%d-%03d.sst", level, sequence));
+    }
+    
+    /**
+     * 获取分区 Bucket 目录
+     * 
+     * @param database 数据库名
+     * @param table 表名
+     * @param partitionPath 分区路径
+     * @param bucket Bucket ID
+     * @return Bucket 目录路径
+     */
+    public Path getBucketDir(String database, String table, String partitionPath, int bucket) {
+        return getTablePath(database, table)
+            .resolve(partitionPath)
+            .resolve("bucket-" + bucket);
+    }
 
     /**
      * 创建表的目录结构

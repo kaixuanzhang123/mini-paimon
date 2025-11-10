@@ -41,19 +41,34 @@ public class LSMTree {
     private final ObjectMapper objectMapper;
     private WriteAheadLog wal;
     private final Compactor compactor;
+    private final AsyncCompactor asyncCompactor;  // 异步 Compaction 执行器
     private final List<Compactor.LeveledSSTable> sstables;
     private final AtomicLong walSequence;
     
+    // 跟踪本次写入会话中新生成的 SSTable 文件元信息
+    private final List<com.mini.paimon.manifest.DataFileMeta> pendingFiles = new ArrayList<>();
+    
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
-        this(schema, pathFactory, database, table, true);
+        this(schema, pathFactory, database, table, true, true);
     }
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, boolean autoSnapshot) throws IOException {
+        this(schema, pathFactory, database, table, autoSnapshot, true);
+    }
+    
+    /**
+     * LSMTree 构造函数
+     * @param autoSnapshot 是否自动创建快照
+     * @param loadExistingFiles 是否加载现有的 SSTable 文件（分区表的 Bucket 应该设为 false）
+     */
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
+                   boolean autoSnapshot, boolean loadExistingFiles) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
-        this.sequenceGenerator = new AtomicLong(0);
+        // 关键修复：使用当前时间戳作为初始 sequence，避免不同 LSMTree 实例产生相同的文件名
+        this.sequenceGenerator = new AtomicLong(System.currentTimeMillis());
         this.walSequence = new AtomicLong(0);
         this.sstReader = new SSTableReader();
         this.sstWriter = new SSTableWriter();
@@ -61,6 +76,7 @@ public class LSMTree {
         this.objectMapper = new ObjectMapper();
         this.sstables = new ArrayList<>();
         this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
+        this.asyncCompactor = new AsyncCompactor(schema, pathFactory, database, table, sequenceGenerator);
         this.autoSnapshot = autoSnapshot;
         
         pathFactory.createTableDirectories(database, table);
@@ -68,7 +84,12 @@ public class LSMTree {
         this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
         
         int recoveredCount = recoverFromWAL();
-        loadExistingSSTables();
+        
+        // 关键修复：分区表的 Bucket LSMTree 不加载现有文件
+        // 因为分区表的数据文件由 Snapshot 管理，而不是直接由 LSMTree 加载
+        if (loadExistingFiles) {
+            loadExistingSSTables();
+        }
         
         Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
         this.wal = new WriteAheadLog(walPath);
@@ -187,9 +208,10 @@ public class LSMTree {
         // 异步刷写不可变内存表到磁盘
         flushImmutableMemTable();
         
-        // 检查是否需要compaction
-        if (compactor.needsCompaction(sstables)) {
-            performCompaction();
+        // 检查是否需要 Compaction（异步执行，不阻塞写入）
+        if (asyncCompactor.needsCompaction(sstables)) {
+            logger.info("Compaction needed, submitting async task");
+            performAsyncCompaction();
         }
     }
 
@@ -331,30 +353,36 @@ public class LSMTree {
         // 生成 SSTable 文件路径
         String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
         
-        // 刷写到磁盘
-        SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
+        // 刷写到磁盘，直接返回 DataFileMeta（包含统计信息）
+        com.mini.paimon.manifest.DataFileMeta fileMeta = sstWriter.flush(
+            immutableMemTable, 
+            sstPath, 
+            schema.getSchemaId(), 
+            0  // level
+        );
         
         logger.info("Flushed memtable to SSTable: {}", sstPath);
         
         // 添加到SSTable列表
         Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
-            sstPath, 0, footer.getMinKey(), footer.getMaxKey(),
-            Files.size(java.nio.file.Paths.get(sstPath)), footer.getRowCount()
+            sstPath, 0, fileMeta.getMinKey(), fileMeta.getMaxKey(),
+            fileMeta.getFileSize(), fileMeta.getRowCount()
         );
         sstables.add(sst);
+        
+        // 关键：跟踪新生成的文件元信息，供 prepareCommit 使用
+        synchronized (pendingFiles) {
+            pendingFiles.add(fileMeta);
+        }
         
         // 只有在自动快照模式下才创建快照
         if (autoSnapshot) {
             // 创建 Manifest 条目
             List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = ManifestEntry.addFile(
-                sstPath,
-                Files.size(java.nio.file.Paths.get(sstPath)),
-                footer.getRowCount(),
-                footer.getMinKey(),
-                footer.getMaxKey(),
-                schema.getSchemaId(),
-                0 // level
+            ManifestEntry entry = new ManifestEntry(
+                ManifestEntry.FileKind.ADD,
+                0,  // bucket
+                fileMeta
             );
             manifestEntries.add(entry);
             
@@ -406,6 +434,45 @@ public class LSMTree {
             logger.info("Compaction completed");
         }
     }
+    
+    /**
+     * 异步执行 Compaction（不阻塞写入）
+     */
+    private void performAsyncCompaction() {
+        // 复制当前 sstables 列表用于异步任务
+        List<Compactor.LeveledSSTable> sstablesCopy = new ArrayList<>(sstables);
+        
+        asyncCompactor.submitCompaction(sstablesCopy, new AsyncCompactor.CompactionCallback() {
+            @Override
+            public void onSuccess(Compactor.CompactionResult result) {
+                // 异步回调：更新 sstables 列表
+                synchronized (sstables) {
+                    if (!result.isEmpty()) {
+                        sstables.removeAll(result.getInputFiles());
+                        sstables.addAll(result.getOutputFiles());
+                        
+                        // 删除旧文件
+                        for (Compactor.LeveledSSTable oldFile : result.getInputFiles()) {
+                            try {
+                                Files.deleteIfExists(java.nio.file.Paths.get(oldFile.getPath()));
+                                logger.debug("Deleted old SSTable: {}", oldFile.getPath());
+                            } catch (Exception e) {
+                                logger.warn("Failed to delete old SSTable: {}", oldFile.getPath(), e);
+                            }
+                        }
+                        
+                        logger.info("Async compaction completed: {} input -> {} output files",
+                            result.getInputFiles().size(), result.getOutputFiles().size());
+                    }
+                }
+            }
+            
+            @Override
+            public void onFailure(Exception e) {
+                logger.error("Async compaction failed", e);
+            }
+        });
+    }
 
     /**
      * 从 SSTable 中获取数据（已废弃，由get方法处理）
@@ -436,30 +503,39 @@ public class LSMTree {
             wal.close();
         }
         
+        // 关闭异步 Compaction 执行器
+        asyncCompactor.shutdown();
+        
         // 刷写活跃内存表
         if (!activeMemTable.isEmpty()) {
             String sstPath = pathFactory.getSSTPath(database, table, 0, activeMemTable.getSequenceNumber()).toString();
-            SSTable.Footer footer = sstWriter.flush(activeMemTable, sstPath);
+            com.mini.paimon.manifest.DataFileMeta fileMeta = sstWriter.flush(
+                activeMemTable, 
+                sstPath, 
+                schema.getSchemaId(), 
+                0
+            );
             
             // 添加到SSTable列表
             Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
-                sstPath, 0, footer.getMinKey(), footer.getMaxKey(),
-                Files.size(java.nio.file.Paths.get(sstPath)), footer.getRowCount()
+                sstPath, 0, fileMeta.getMinKey(), fileMeta.getMaxKey(),
+                fileMeta.getFileSize(), fileMeta.getRowCount()
             );
             sstables.add(sst);
+            
+            // 关键：跟踪新生成的文件元信息，供 prepareCommit 使用
+            synchronized (pendingFiles) {
+                pendingFiles.add(fileMeta);
+            }
             
             // 只在自动快照模式下创建快照
             if (autoSnapshot) {
                 // 创建 Manifest 条目
                 List<ManifestEntry> manifestEntries = new ArrayList<>();
-                ManifestEntry entry = ManifestEntry.addFile(
-                    sstPath,
-                    Files.size(java.nio.file.Paths.get(sstPath)),
-                    footer.getRowCount(),
-                    footer.getMinKey(),
-                    footer.getMaxKey(),
-                    schema.getSchemaId(),
-                    0 // level
+                ManifestEntry entry = new ManifestEntry(
+                    ManifestEntry.FileKind.ADD,
+                    0,
+                    fileMeta
                 );
                 manifestEntries.add(entry);
                 
@@ -480,20 +556,26 @@ public class LSMTree {
         // 刷写不可变内存表
         if (immutableMemTable != null && !immutableMemTable.isEmpty()) {
             String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
-            SSTable.Footer footer = sstWriter.flush(immutableMemTable, sstPath);
+            com.mini.paimon.manifest.DataFileMeta fileMeta = sstWriter.flush(
+                immutableMemTable, 
+                sstPath, 
+                schema.getSchemaId(), 
+                0
+            );
+            
+            // 关键：跟踪新生成的文件元信息，供 prepareCommit 使用
+            synchronized (pendingFiles) {
+                pendingFiles.add(fileMeta);
+            }
             
             // 只在自动快照模式下创建快照
             if (autoSnapshot) {
                 // 创建 Manifest 条目
                 List<ManifestEntry> manifestEntries = new ArrayList<>();
-                ManifestEntry entry = ManifestEntry.addFile(
-                    sstPath,
-                    Files.size(java.nio.file.Paths.get(sstPath)),
-                    footer.getRowCount(),
-                    footer.getMinKey(),
-                    footer.getMaxKey(),
-                    schema.getSchemaId(),
-                    0 // level
+                ManifestEntry entry = new ManifestEntry(
+                    ManifestEntry.FileKind.ADD,
+                    0,
+                    fileMeta
                 );
                 manifestEntries.add(entry);
                 
@@ -511,5 +593,19 @@ public class LSMTree {
     public String getStatus() {
         return String.format("LSMTree{activeMemTable=%s, immutableMemTable=%s}", 
                            activeMemTable, immutableMemTable != null ? immutableMemTable : "null");
+    }
+    
+    /**
+     * 获取并清空待提交的文件元信息列表
+     * 用于 prepareCommit 阶段获取本次写入会话生成的所有文件
+     * 
+     * @return 文件元信息列表
+     */
+    public List<com.mini.paimon.manifest.DataFileMeta> getPendingFiles() {
+        synchronized (pendingFiles) {
+            List<com.mini.paimon.manifest.DataFileMeta> files = new ArrayList<>(pendingFiles);
+            pendingFiles.clear();
+            return files;
+        }
     }
 }

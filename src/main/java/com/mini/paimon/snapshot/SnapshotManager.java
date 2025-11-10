@@ -115,25 +115,85 @@ public class SnapshotManager {
         String deltaManifestListName = "manifest-list-delta-" + snapshotId;
         deltaManifestList.persist(pathFactory, database, table, snapshotId);
         
-        // 6. 创建 Base Manifest List（包含历史 + 本次变更）
+        // 6. 创建 Base Manifest List（合并历史 + 本次变更）
         ManifestList baseManifestList = new ManifestList();
-        baseManifestList.addManifestFile(deltaManifestMeta);
         
-        // 如果存在之前的快照，合并其 Base Manifest List
+        // Manifest 合并逻辑：
+        // 1. 读取所有历史 Manifest entries
+        // 2. 与本次 delta entries 合并
+        // 3. 对同一文件：ADD + DELETE = 不存在
+        // 4. 只保留最终状态为 ADD 的文件
+        
+        // 收集所有文件的状态：文件名 -> ManifestEntry
+        java.util.Map<String, ManifestEntry> fileStateMap = new java.util.LinkedHashMap<>();
+        
+        // 先加载历史的所有 entries
         if (Snapshot.hasLatestSnapshot(pathFactory, database, table)) {
             try {
                 Snapshot previousSnapshot = Snapshot.loadLatest(pathFactory, database, table);
                 ManifestList previousBaseList = ManifestList.load(
                     pathFactory, database, table, previousSnapshot.getId());
+                
+                // 读取所有历史 manifest files 中的 entries
                 for (ManifestFileMeta prevManifestFile : previousBaseList.getManifestFiles()) {
-                    baseManifestList.addManifestFile(prevManifestFile);
+                    ManifestFile manifestFile = ManifestFile.load(
+                        pathFactory, database, table, prevManifestFile.getFileName());
+                    
+                    for (ManifestEntry entry : manifestFile.getEntries()) {
+                        String fileName = entry.getFile().getFileName();
+                        
+                        if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                            // ADD：添加或更新文件状态
+                            fileStateMap.put(fileName, entry);
+                        } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
+                            // DELETE：移除文件状态
+                            fileStateMap.remove(fileName);
+                        }
+                    }
                 }
+                
+                logger.debug("Loaded {} active files from previous snapshot {}", 
+                    fileStateMap.size(), previousSnapshot.getId());
+                    
             } catch (IOException e) {
                 logger.warn("Failed to load previous snapshot base manifest list", e);
             }
         }
         
+        // 再应用本次的 delta entries
+        for (ManifestEntry entry : manifestEntries) {
+            String fileName = entry.getFile().getFileName();
+            
+            if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                fileStateMap.put(fileName, entry);
+            } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
+                fileStateMap.remove(fileName);
+            }
+        }
+        
+        logger.debug("After merging delta, {} active files remain", fileStateMap.size());
+        
+        // 将合并后的所有 ADD 文件创建为新的 manifest
+        if (!fileStateMap.isEmpty()) {
+            List<ManifestEntry> mergedEntries = new java.util.ArrayList<>(fileStateMap.values());
+            
+            // 生成新的 merged manifest ID
+            String mergedManifestId = idGenerator.generateManifestId();
+            
+            // 创建 merged manifest file
+            ManifestFile mergedManifestFile = new ManifestFile(mergedEntries);
+            mergedManifestFile.persist(pathFactory, database, table, mergedManifestId);
+            
+            // 计算 merged manifest meta
+            ManifestFileMeta mergedManifestMeta = buildManifestFileMeta(
+                "manifest-" + mergedManifestId, mergedEntries, schemaId);
+            
+            baseManifestList.addManifestFile(mergedManifestMeta);
+        }
+        
         String baseManifestListName = "manifest-list-" + snapshotId;
+        // 持久化 Base Manifest List
+        baseManifestList.persist(pathFactory, database, table, snapshotId);
         
         // 7. 计算记录数
         long deltaRecordCount = calculateRecordCount(manifestEntries);
