@@ -78,8 +78,8 @@ public class RowKey implements Comparable<RowKey> {
                     size += 1;
                     break;
                 case STRING:
-                    String str = (String) value;
-                    size += 4 + str.getBytes(StandardCharsets.UTF_8).length; // 长度 + 内容
+                    String str = value != null ? value.toString() : "";
+                    size += 4 + str.getBytes(StandardCharsets.UTF_8).length;
                     break;
             }
         }
@@ -92,10 +92,22 @@ public class RowKey implements Comparable<RowKey> {
     private static void serializeValue(ByteBuffer buffer, Object value, DataType type) {
         switch (type) {
             case INT:
-                buffer.putInt((Integer) value);
+                if (value instanceof Integer) {
+                    buffer.putInt((Integer) value);
+                } else if (value instanceof Long) {
+                    buffer.putInt(((Long) value).intValue());
+                } else {
+                    buffer.putInt(((Number) value).intValue());
+                }
                 break;
             case LONG:
-                buffer.putLong((Long) value);
+                if (value instanceof Long) {
+                    buffer.putLong((Long) value);
+                } else if (value instanceof Integer) {
+                    buffer.putLong(((Integer) value).longValue());
+                } else {
+                    buffer.putLong(((Number) value).longValue());
+                }
                 break;
             case BOOLEAN:
                 buffer.put((byte) (((Boolean) value) ? 1 : 0));

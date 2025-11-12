@@ -228,6 +228,8 @@ public interface Catalog extends Closeable {
      */
     List<Snapshot> listSnapshots(Identifier identifier) throws CatalogException;
     
+    List<com.mini.paimon.partition.PartitionSpec> listPartitions(String database, String table) throws CatalogException;
+    
     // ==================== Table 操作 ====================
     
     /**

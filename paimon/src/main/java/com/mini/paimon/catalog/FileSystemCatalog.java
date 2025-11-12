@@ -1,11 +1,13 @@
 package com.mini.paimon.catalog;
 
 import com.mini.paimon.exception.CatalogException;
+import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.metadata.SchemaManager;
 import com.mini.paimon.metadata.TableManager;
 import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.table.Table;
@@ -18,8 +20,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -561,6 +565,24 @@ public class FileSystemCatalog implements Catalog {
         } catch (IOException e) {
             throw new CatalogException("Failed to list snapshots for table: " + identifier, e);
         }
+    }
+    
+    @Override
+    public List<PartitionSpec> listPartitions(String database, String table) throws CatalogException {
+        checkNotClosed();
+        
+        Identifier identifier = new Identifier(database, table);
+        
+        if (!tableExists(identifier)) {
+            throw new CatalogException.TableNotExistException(identifier);
+        }
+        
+        Schema schema = getTableSchema(identifier);
+        if (schema.getPartitionKeys().isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        return new ArrayList<>();
     }
     
     // ==================== Table 操作 ====================
