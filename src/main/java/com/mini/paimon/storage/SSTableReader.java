@@ -210,22 +210,32 @@ public class SSTableReader {
             byte[] indexBytes = new byte[indexSize];
             indexBuffer.get(indexBytes);
             
-            // 反序列化索引条目
-            List<SSTable.IndexEntry> indexEntries = objectMapper.readValue(
-                    indexBytes, 
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.IndexEntry.class)
-            );
+            // 反序列化索引条目（先尝试BlockIndexEntry，失败则回退到IndexEntry）
+            List<SSTable.BlockIndexEntry> indexEntries;
+            try {
+                indexEntries = objectMapper.readValue(
+                        indexBytes, 
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.BlockIndexEntry.class)
+                );
+            } catch (Exception e) {
+                // 向后兼容：尝试读取旧的IndexEntry格式
+                logger.debug("Failed to read BlockIndexEntry, trying legacy IndexEntry format");
+                List<SSTable.IndexEntry> legacyEntries = objectMapper.readValue(
+                        indexBytes, 
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.IndexEntry.class)
+                );
+                indexEntries = new ArrayList<>(legacyEntries);
+            }
             
-            // 简化实现：找到第一个大于等于目标键的索引条目
-            for (SSTable.IndexEntry entry : indexEntries) {
-                if (entry.getKey().compareTo(key) >= 0) {
-                    return entry.getOffset();
+            for (SSTable.BlockIndexEntry entry : indexEntries) {
+                if (entry.mightContainKey(key)) {
+                    return entry.getBlockOffset();
                 }
             }
             
             // 如果没有找到，返回最后一个数据块
             if (!indexEntries.isEmpty()) {
-                return indexEntries.get(indexEntries.size() - 1).getOffset();
+                return indexEntries.get(indexEntries.size() - 1).getBlockOffset();
             }
         } catch (Exception e) {
             logger.warn("Failed to read index, scanning all blocks: {}", e.getMessage());
@@ -236,20 +246,19 @@ public class SSTableReader {
 
     /**
      * 在数据块中查找具体数据
+     * 新逻辑：使用RowIndex进行精确定位
      */
     private Row findRowInDataBlock(FileChannel fileChannel, long blockOffset, RowKey key) 
             throws IOException {
         try {
-            // 定位数据块
+            // 1. 读取DataBlock
             fileChannel.position(blockOffset);
             
-            // 读取数据块大小
             ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
             fileChannel.read(sizeBuffer);
             sizeBuffer.flip();
             int blockSize = sizeBuffer.getInt();
             
-            // 读取数据块数据
             ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
             fileChannel.read(blockBuffer);
             blockBuffer.flip();
@@ -257,13 +266,30 @@ public class SSTableReader {
             byte[] blockBytes = new byte[blockSize];
             blockBuffer.get(blockBytes);
             
-            // 反序列化数据块
             SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
             
-            // 在数据块中查找目标行
-            for (SSTable.RowData rowData : dataBlock.getRows()) {
-                if (rowData.getKey().equals(key)) {
-                    return rowData.getRow();
+            // 2. 读取RowIndex
+            ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+            fileChannel.read(rowIndexSizeBuffer);
+            rowIndexSizeBuffer.flip();
+            int rowIndexSize = rowIndexSizeBuffer.getInt();
+            
+            ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+            fileChannel.read(rowIndexBuffer);
+            rowIndexBuffer.flip();
+            
+            byte[] rowIndexBytes = new byte[rowIndexSize];
+            rowIndexBuffer.get(rowIndexBytes);
+            
+            List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                rowIndexBytes,
+                objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.RowIndexEntry.class)
+            );
+            
+            // 3. 二分查找RowIndex
+            for (SSTable.RowIndexEntry entry : rowIndex) {
+                if (entry.getKey().equals(key)) {
+                    return dataBlock.getRowByIndex(entry);
                 }
             }
         } catch (Exception e) {
@@ -315,18 +341,46 @@ public class SSTableReader {
                 blockBuffer.get(blockBytes);
                 
                 try {
-                    // 反序列化数据块
+                    // 读取DataBlock
                     SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
                     
-                    // 添加数据块中的所有行到结果列表
-                    for (SSTable.RowData rowData : dataBlock.getRows()) {
-                        rows.add(rowData.getRow());
+                    // 读取RowIndex
+                    long currentPos = position + 4 + blockSize;
+                    fileChannel.position(currentPos);
+                    
+                    ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                    int rowIndexBytesRead = fileChannel.read(rowIndexSizeBuffer);
+                    int rowIndexSize = 0;
+                    if (rowIndexBytesRead == 4) {
+                        rowIndexSizeBuffer.flip();
+                        rowIndexSize = rowIndexSizeBuffer.getInt();
+                        
+                        if (rowIndexSize > 0 && rowIndexSize < 1024 * 1024) {
+                            ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+                            fileChannel.read(rowIndexBuffer);
+                            rowIndexBuffer.flip();
+                            
+                            byte[] rowIndexBytes = new byte[rowIndexSize];
+                            rowIndexBuffer.get(rowIndexBytes);
+                            
+                            List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                                rowIndexBytes,
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.RowIndexEntry.class)
+                            );
+                            
+                            // 添加所有行到结果列表
+                            for (SSTable.RowIndexEntry entry : rowIndex) {
+                                Row row = dataBlock.getRowByIndex(entry);
+                                rows.add(row);
+                            }
+                        }
                     }
+                    // 移动到下一个Block：当前position + DataBlock(4+size) + RowIndex(4+size)
+                    position += 4 + blockSize + 4 + rowIndexSize;
                 } catch (Exception e) {
                     logger.warn("Failed to read data block at position {}: {}", position, e.getMessage());
+                    position += 4 + blockSize; // 出错时至少跳过DataBlock
                 }
-                
-                position += 4 + blockSize;
             } catch (Exception e) {
                 logger.warn("Error scanning data blocks at position {}: {}", position, e.getMessage());
                 break;
@@ -402,22 +456,50 @@ public class SSTableReader {
                 blockBuffer.get(blockBytes);
                 
                 try {
-                    // 反序列化数据块
+                    // 读取DataBlock
                     SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
                     
-                    // 添加数据块中的所有行到结果列表（过滤范围）
-                    for (SSTable.RowData rowData : dataBlock.getRows()) {
-                        RowKey rowKey = rowData.getKey();
-                        if ((startKey == null || rowKey.compareTo(startKey) >= 0) && 
-                            (endKey == null || rowKey.compareTo(endKey) <= 0)) {
-                            callback.onRow(rowData.getRow());
+                    // 读取RowIndex
+                    long currentPos = position + 4 + blockSize;
+                    fileChannel.position(currentPos);
+                    
+                    ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                    int rowIndexBytesRead = fileChannel.read(rowIndexSizeBuffer);
+                    int rowIndexSize = 0;
+                    if (rowIndexBytesRead == 4) {
+                        rowIndexSizeBuffer.flip();
+                        rowIndexSize = rowIndexSizeBuffer.getInt();
+                        
+                        if (rowIndexSize > 0 && rowIndexSize < 1024 * 1024) {
+                            ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+                            fileChannel.read(rowIndexBuffer);
+                            rowIndexBuffer.flip();
+                            
+                            byte[] rowIndexBytes = new byte[rowIndexSize];
+                            rowIndexBuffer.get(rowIndexBytes);
+                            
+                            List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                                rowIndexBytes,
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.RowIndexEntry.class)
+                            );
+                            
+                            // 添加符合范围的行
+                            for (SSTable.RowIndexEntry entry : rowIndex) {
+                                RowKey rowKey = entry.getKey();
+                                if ((startKey == null || rowKey.compareTo(startKey) >= 0) && 
+                                    (endKey == null || rowKey.compareTo(endKey) <= 0)) {
+                                    Row row = dataBlock.getRowByIndex(entry);
+                                    callback.onRow(row);
+                                }
+                            }
                         }
                     }
+                    // 移动到下一个Block：当前position + DataBlock(4+size) + RowIndex(4+size)
+                    position += 4 + blockSize + 4 + rowIndexSize;
                 } catch (Exception e) {
                     logger.warn("Failed to read data block at position {}: {}", position, e.getMessage());
+                    position += 4 + blockSize; // 出错时至少跳过DataBlock
                 }
-                
-                position += 4 + blockSize;
             } catch (Exception e) {
                 logger.warn("Error scanning data blocks at position {}: {}", position, e.getMessage());
                 break;

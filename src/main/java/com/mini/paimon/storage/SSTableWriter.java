@@ -54,7 +54,7 @@ public class SSTableWriter {
     public com.mini.paimon.manifest.DataFileMeta flush(MemTable memTable, String filePath, int schemaId, int level) throws IOException {
         logger.info("Flushing MemTable to SSTable: {}", filePath);
         
-        // 获取内存表中的所有条目
+        // 获取内存表中的所有条目（已按 RowKey 排序）
         Map<RowKey, Row> entries = memTable.getEntries();
         if (entries.isEmpty()) {
             throw new IllegalArgumentException("MemTable is empty");
@@ -65,28 +65,32 @@ public class SSTableWriter {
         File file = path.toFile();
         file.getParentFile().mkdirs();
         
+        // 记录实际的 minKey 和 maxKey（从有序数据中直接获取）
+        RowKey minKey = null;
+        RowKey maxKey = null;
+        
         try (FileChannel fileChannel = FileChannel.open(path, 
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
             
-            // 1. 写入数据块
-            List<SSTable.DataBlock> dataBlocks = writeDataBlocks(fileChannel, entries);
+            // 1. 写入数据块（按顺序写入，保证有序性）
+            WriteResult writeResult = writeDataBlocks(fileChannel, entries);
+            minKey = writeResult.minKey;
+            maxKey = writeResult.maxKey;
             
             // 2. 写入布隆过滤器
             long bloomFilterOffset = fileChannel.position();
             BloomFilter<byte[]> bloomFilter = writeBloomFilter(fileChannel, entries.keySet());
             long bloomFilterSize = fileChannel.position() - bloomFilterOffset;
             
-            // 3. 写入索引块
             long indexOffset = fileChannel.position();
-            List<SSTable.IndexEntry> indexEntries = writeIndexBlock(fileChannel, dataBlocks);
+            List<SSTable.BlockIndexEntry> indexEntries = writeIndexBlock(fileChannel, writeResult.blockMetadataList);
             long indexSize = fileChannel.position() - indexOffset;
             
-            // 4. 构建 Footer
-            SSTable.Footer footer = buildFooter(
+            SSTable.Footer footer = new SSTable.Footer(
                     indexOffset, indexSize,
                     bloomFilterOffset, bloomFilterSize,
-                    dataBlocks.size(), entries.size(),
-                    indexEntries
+                    writeResult.blockMetadataList.size(), entries.size(),
+                    minKey, maxKey
             );
             
             // 5. 写入 Footer
@@ -97,8 +101,8 @@ public class SSTableWriter {
             
             long fileSize = fileChannel.size();
             
-            logger.info("Successfully flushed MemTable to SSTable with {} entries, {} data blocks", 
-                       entries.size(), dataBlocks.size());
+            logger.info("Successfully flushed MemTable to SSTable: file={}, entries={}, blocks={}, minKey={}, maxKey={}", 
+                       filePath, entries.size(), writeResult.blockMetadataList.size(), minKey, maxKey);
             
             // 6. 构建 DataFileMeta（包含统计信息，避免后续扫描）
             // 提取相对路径（去除绝对路径前缀）
@@ -108,8 +112,8 @@ public class SSTableWriter {
                 fileName,
                 fileSize,
                 entries.size(),
-                footer.getMinKey(),
-                footer.getMaxKey(),
+                minKey,
+                maxKey,
                 schemaId,
                 level,
                 System.currentTimeMillis()
@@ -118,71 +122,177 @@ public class SSTableWriter {
     }
 
     /**
-     * 写入数据块
+     * 写入数据块，生成Block级索引和Row级索引
+     * 
+     * 数据结构：
+     * [DataBlock1][RowIndex1][DataBlock2][RowIndex2]...
+     * 
+     * 每个DataBlock后紧跟其RowIndex，这样可以在定位到Block后立即读取RowIndex
      */
-    private List<SSTable.DataBlock> writeDataBlocks(FileChannel fileChannel, Map<RowKey, Row> entries) 
+    private WriteResult writeDataBlocks(FileChannel fileChannel, Map<RowKey, Row> entries) 
             throws IOException {
-        List<SSTable.DataBlock> dataBlocks = new ArrayList<>();
-        List<SSTable.RowData> currentBlockRows = new ArrayList<>();
+        List<BlockMetadata> blockMetadataList = new ArrayList<>();
+        List<RowKey> currentBlockKeys = new ArrayList<>();
+        List<Row> currentBlockValues = new ArrayList<>();
         int currentBlockSize = 0;
         
-        // 遍历所有条目
+        RowKey minKey = null;
+        RowKey maxKey = null;
+        
         for (Map.Entry<RowKey, Row> entry : entries.entrySet()) {
-            SSTable.RowData rowData = new SSTable.RowData(entry.getKey(), entry.getValue());
-            int rowSize = estimateRowSize(rowData);
+            RowKey key = entry.getKey();
+            Row value = entry.getValue();
             
-            // 检查是否需要创建新的数据块
-            if (!currentBlockRows.isEmpty() && currentBlockSize + rowSize > DEFAULT_BLOCK_SIZE) {
-                // 写入当前数据块
-                SSTable.DataBlock dataBlock = new SSTable.DataBlock(new ArrayList<>(currentBlockRows));
-                writeDataBlock(fileChannel, dataBlock);
-                dataBlocks.add(dataBlock);
+            if (minKey == null) {
+                minKey = key;
+            }
+            maxKey = key;
+            
+            int rowSize = estimateRowSize(key, value);
+            
+            // 当前Block已满，写入磁盘
+            if (!currentBlockKeys.isEmpty() && currentBlockSize + rowSize > DEFAULT_BLOCK_SIZE) {
+                BlockMetadata blockMeta = writeBlockWithRowIndex(
+                    fileChannel, currentBlockKeys, currentBlockValues);
+                blockMetadataList.add(blockMeta);
                 
-                // 重置当前块
-                currentBlockRows.clear();
+                currentBlockKeys.clear();
+                currentBlockValues.clear();
                 currentBlockSize = 0;
             }
             
-            currentBlockRows.add(rowData);
+            currentBlockKeys.add(key);
+            currentBlockValues.add(value);
             currentBlockSize += rowSize;
         }
         
-        // 写入最后一个数据块（如果有数据）
-        if (!currentBlockRows.isEmpty()) {
-            SSTable.DataBlock dataBlock = new SSTable.DataBlock(new ArrayList<>(currentBlockRows));
-            writeDataBlock(fileChannel, dataBlock);
-            dataBlocks.add(dataBlock);
+        // 写入最后一个Block
+        if (!currentBlockKeys.isEmpty()) {
+            BlockMetadata blockMeta = writeBlockWithRowIndex(
+                fileChannel, currentBlockKeys, currentBlockValues);
+            blockMetadataList.add(blockMeta);
         }
         
-        return dataBlocks;
+        return new WriteResult(blockMetadataList, minKey, maxKey);
     }
-
+    
     /**
-     * 写入单个数据块
+     * 写入一个DataBlock及其RowIndex
+     * 
+     * 格式：[DataBlock][RowIndex]
+     * DataBlock: [valuesData连续字节流]
+     * RowIndex: [RowIndexEntry数组]，每个Entry包含(key, offset, length)
      */
-    private void writeDataBlock(FileChannel fileChannel, SSTable.DataBlock dataBlock) throws IOException {
-        // 序列化数据块
-        byte[] blockData = objectMapper.writeValueAsBytes(dataBlock);
+    private BlockMetadata writeBlockWithRowIndex(
+            FileChannel fileChannel, 
+            List<RowKey> keys, 
+            List<Row> values) throws IOException {
         
-        // 写入数据块大小
+        long blockStartOffset = fileChannel.position();
+        
+        // 1. 构建valuesData连续字节流，并记录每行的offset和length
+        List<SSTable.RowIndexEntry> rowIndexEntries = new ArrayList<>();
+        ByteArrayOutputStream valuesStream = new ByteArrayOutputStream();
+        
+        for (int i = 0; i < keys.size(); i++) {
+            RowKey key = keys.get(i);
+            Row value = values.get(i);
+            
+            int valueOffset = valuesStream.size();
+            byte[] valueBytes = objectMapper.writeValueAsBytes(value);
+            valuesStream.write(valueBytes);
+            int valueLength = valueBytes.length;
+            
+            rowIndexEntries.add(new SSTable.RowIndexEntry(key, valueOffset, valueLength));
+        }
+        
+        byte[] valuesData = valuesStream.toByteArray();
+        
+        // 2. 写入DataBlock
+        SSTable.DataBlock dataBlock = new SSTable.DataBlock(valuesData, keys.size());
+        byte[] blockBytes = objectMapper.writeValueAsBytes(dataBlock);
+        
+        // 写入Block大小
         ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
-        sizeBuffer.putInt(blockData.length);
+        sizeBuffer.putInt(blockBytes.length);
         sizeBuffer.flip();
         fileChannel.write(sizeBuffer);
         
-        // 写入数据块数据
-        ByteBuffer dataBuffer = ByteBuffer.wrap(blockData);
-        fileChannel.write(dataBuffer);
+        // 写入Block数据
+        ByteBuffer blockBuffer = ByteBuffer.wrap(blockBytes);
+        fileChannel.write(blockBuffer);
+        
+        int blockSize = 4 + blockBytes.length;
+        
+        // 3. 写入RowIndex（紧跟在DataBlock后）
+        long rowIndexOffset = fileChannel.position();
+        byte[] rowIndexBytes = objectMapper.writeValueAsBytes(rowIndexEntries);
+        
+        // 写入RowIndex大小
+        ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+        rowIndexSizeBuffer.putInt(rowIndexBytes.length);
+        rowIndexSizeBuffer.flip();
+        fileChannel.write(rowIndexSizeBuffer);
+        
+        // 写入RowIndex数据
+        ByteBuffer rowIndexBuffer = ByteBuffer.wrap(rowIndexBytes);
+        fileChannel.write(rowIndexBuffer);
+        
+        int rowIndexSize = 4 + rowIndexBytes.length;
+        
+        // 4. 返回Block元数据
+        RowKey firstKey = keys.get(0);
+        RowKey lastKey = keys.get(keys.size() - 1);
+        
+        return new BlockMetadata(
+            blockStartOffset, 
+            blockSize, 
+            firstKey, 
+            lastKey, 
+            keys.size(),
+            rowIndexOffset,
+            rowIndexSize
+        );
+    }
+    
+    private static class WriteResult {
+        final List<BlockMetadata> blockMetadataList;
+        final RowKey minKey;
+        final RowKey maxKey;
+        
+        WriteResult(List<BlockMetadata> blockMetadataList, RowKey minKey, RowKey maxKey) {
+            this.blockMetadataList = blockMetadataList;
+            this.minKey = minKey;
+            this.maxKey = maxKey;
+        }
+    }
+    
+    private static class BlockMetadata {
+        final long offset;
+        final int size;
+        final RowKey firstKey;
+        final RowKey lastKey;
+        final int rowCount;
+        final long rowIndexOffset;
+        final int rowIndexSize;
+        
+        BlockMetadata(long offset, int size, RowKey firstKey, RowKey lastKey, int rowCount,
+                     long rowIndexOffset, int rowIndexSize) {
+            this.offset = offset;
+            this.size = size;
+            this.firstKey = firstKey;
+            this.lastKey = lastKey;
+            this.rowCount = rowCount;
+            this.rowIndexOffset = rowIndexOffset;
+            this.rowIndexSize = rowIndexSize;
+        }
     }
 
-    /**
-     * 估算行大小
-     */
-    private int estimateRowSize(SSTable.RowData rowData) {
+    private int estimateRowSize(RowKey key, Row value) {
         try {
-            return rowData.getKey().size() + objectMapper.writeValueAsBytes(rowData.getRow()).length + 100; // 预留一些空间
+            return key.size() + objectMapper.writeValueAsBytes(value).length + 100;
         } catch (Exception e) {
-            return 1024; // 默认大小
+            return 1024;
         }
     }
 
@@ -225,59 +335,40 @@ public class SSTableWriter {
     }
 
     /**
-     * 写入索引块
+     * 写入Block级索引
+     * 每个BlockIndexEntry包含Block的位置信息和对应RowIndex的位置信息
      */
-    private List<SSTable.IndexEntry> writeIndexBlock(FileChannel fileChannel, List<SSTable.DataBlock> dataBlocks) 
+    private List<SSTable.BlockIndexEntry> writeIndexBlock(FileChannel fileChannel, List<BlockMetadata> blockMetadataList) 
             throws IOException {
-        List<SSTable.IndexEntry> indexEntries = new ArrayList<>();
-        long currentOffset = 0;
+        List<SSTable.BlockIndexEntry> indexEntries = new ArrayList<>();
         
-        // 为每个数据块创建索引条目（简化实现，使用第一个键作为索引）
-        for (SSTable.DataBlock dataBlock : dataBlocks) {
-            if (!dataBlock.getRows().isEmpty()) {
-                RowKey firstKey = dataBlock.getRows().get(0).getKey();
-                SSTable.IndexEntry indexEntry = new SSTable.IndexEntry(firstKey, currentOffset);
-                indexEntries.add(indexEntry);
-                
-                // 更新偏移量（简化计算）
-                currentOffset += 4096; // 假设每个块大约4KB
-            }
+        for (BlockMetadata blockMeta : blockMetadataList) {
+            SSTable.BlockIndexEntry indexEntry = new SSTable.BlockIndexEntry(
+                blockMeta.firstKey,
+                blockMeta.lastKey,
+                blockMeta.offset,
+                blockMeta.size,
+                blockMeta.rowCount,
+                blockMeta.rowIndexOffset,
+                blockMeta.rowIndexSize
+            );
+            indexEntries.add(indexEntry);
         }
         
-        // 序列化索引条目
         byte[] indexData = objectMapper.writeValueAsBytes(indexEntries);
         
-        // 写入索引块大小
         ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
         sizeBuffer.putInt(indexData.length);
         sizeBuffer.flip();
         fileChannel.write(sizeBuffer);
         
-        // 写入索引块数据
         ByteBuffer dataBuffer = ByteBuffer.wrap(indexData);
         fileChannel.write(dataBuffer);
         
         return indexEntries;
     }
 
-    /**
-     * 构建 Footer
-     */
-    private SSTable.Footer buildFooter(long indexOffset, long indexSize,
-                                      long bloomFilterOffset, long bloomFilterSize,
-                                      int dataBlockCount, long rowCount,
-                                      List<SSTable.IndexEntry> indexEntries) {
-        // 获取最小和最大键
-        RowKey minKey = indexEntries.get(0).getKey();
-        RowKey maxKey = indexEntries.get(indexEntries.size() - 1).getKey();
-        
-        return new SSTable.Footer(
-                indexOffset, indexSize,
-                bloomFilterOffset, bloomFilterSize,
-                dataBlockCount, rowCount,
-                minKey, maxKey
-        );
-    }
+
 
     /**
      * 写入 Footer

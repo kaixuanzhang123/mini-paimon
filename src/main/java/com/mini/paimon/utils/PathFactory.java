@@ -172,8 +172,8 @@ public class PathFactory {
      */
     public void createTableDirectories(String database, String table) throws IOException {
         Files.createDirectories(getSchemaDir(database, table));
-        Files.createDirectories(getSnapshotDir(database, table));
-        Files.createDirectories(getManifestDir(database, table));
+        //Files.createDirectories(getSnapshotDir(database, table));
+        //Files.createDirectories(getManifestDir(database, table));
         Files.createDirectories(getDataDir(database, table));
         Files.createDirectories(getWalDir(database, table));
     }

@@ -44,26 +44,27 @@ public class SSTableRecordReader implements FileRecordReader {
     private Predicate predicate;
     private Projection projection;
     
-    // Block 迭代器状态
     private Iterator<BlockInfo> blockIterator;
     private Iterator<Row> currentBlockRows;
     
-    // 范围扫描
     private RowKey startKey;
     private RowKey endKey;
+    
+    private boolean isPointQuery = false;
+    private RowKey exactKey = null;
+    private boolean initialized = false;
     
     public SSTableRecordReader(String filePath, Schema schema) throws IOException {
         this.filePath = filePath;
         this.schema = schema;
         this.objectMapper = new ObjectMapper();
-        this.init();
     }
     
-    /**
-     * 设置过滤条件
-     */
     public SSTableRecordReader withFilter(Predicate predicate) {
         this.predicate = predicate;
+        if (!isInitialized()) {
+            extractKeyFromPredicate(predicate);
+        }
         return this;
     }
     
@@ -75,21 +76,68 @@ public class SSTableRecordReader implements FileRecordReader {
         return this;
     }
     
-    /**
-     * 设置扫描范围
-     */
     public SSTableRecordReader withRange(RowKey startKey, RowKey endKey) {
         this.startKey = startKey;
         this.endKey = endKey;
+        this.isPointQuery = (startKey != null && endKey != null && startKey.equals(endKey));
+        if (isPointQuery) {
+            this.exactKey = startKey;
+        }
         return this;
     }
     
+    private void extractKeyFromPredicate(Predicate pred) {
+        if (pred == null || !schema.hasPrimaryKey()) {
+            return;
+        }
+        
+        if (pred instanceof Predicate.FieldPredicate) {
+            Predicate.FieldPredicate fp = (Predicate.FieldPredicate) pred;
+            if (fp.getOp() == Predicate.CompareOp.EQ && isPrimaryKeyField(fp.getFieldName())) {
+                this.exactKey = createRowKeyFromValue(fp.getValue());
+                this.isPointQuery = true;
+                this.startKey = exactKey;
+                this.endKey = exactKey;
+            }
+        }
+    }
+    
+    private boolean isPrimaryKeyField(String fieldName) {
+        List<String> primaryKeys = schema.getPrimaryKeys();
+        return !primaryKeys.isEmpty() && primaryKeys.get(0).equals(fieldName);
+    }
+    
+    private RowKey createRowKeyFromValue(Object value) {
+        if (value instanceof Integer) {
+            return new RowKey(java.nio.ByteBuffer.allocate(4).putInt((Integer) value).array());
+        } else if (value instanceof Long) {
+            return new RowKey(java.nio.ByteBuffer.allocate(8).putLong((Long) value).array());
+        } else if (value instanceof String) {
+            return new RowKey(((String) value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return null;
+    }
+    
     private void init() throws IOException {
+        if (initialized) {
+            return;
+        }
+        
         Path path = Paths.get(filePath);
         this.fileChannel = FileChannel.open(path, StandardOpenOption.READ);
         this.footer = readFooter();
-        this.blockIterator = buildBlockIterator();
+        
+        if (isPointQuery && exactKey != null) {
+            this.blockIterator = buildPointQueryIterator(exactKey);
+        } else {
+            this.blockIterator = buildBlockIterator();
+        }
         this.currentBlockRows = null;
+        this.initialized = true;
+    }
+    
+    private boolean isInitialized() {
+        return initialized;
     }
     
     @Override
@@ -99,20 +147,22 @@ public class SSTableRecordReader implements FileRecordReader {
     
     @Override
     public void seekToKey(RowKey key) throws IOException {
-        // 重建迭代器，从指定键开始
         this.startKey = key;
-        this.blockIterator = buildBlockIterator();
+        this.initialized = false;
+        this.blockIterator = null;
         this.currentBlockRows = null;
     }
     
     @Override
     public boolean hasNext() throws IOException {
+        init();
         ensureCurrentBlockRows();
         return currentBlockRows != null && currentBlockRows.hasNext();
     }
     
     @Override
     public Row readRecord() throws IOException {
+        init();
         ensureCurrentBlockRows();
         
         if (currentBlockRows == null || !currentBlockRows.hasNext()) {
@@ -148,28 +198,21 @@ public class SSTableRecordReader implements FileRecordReader {
         }
     }
     
-    /**
-     * 确保当前 Block 的行迭代器已准备好
-     */
     private void ensureCurrentBlockRows() throws IOException {
         while ((currentBlockRows == null || !currentBlockRows.hasNext()) && blockIterator.hasNext()) {
             BlockInfo blockInfo = blockIterator.next();
             
-            // 优化：Block 级别的跳过
             if (canSkipBlock(blockInfo)) {
-                logger.debug("Skipped block at offset {} due to filter", blockInfo.offset);
+                logger.debug("Skipped block at offset {}", blockInfo.offset);
                 continue;
             }
             
-            // 读取 Block 中的行
             List<Row> rows = readBlockRows(blockInfo);
             
-            // 应用过滤
-            if (predicate != null) {
+            if (predicate != null && !isPointQuery) {
                 rows = applyFilter(rows);
             }
             
-            // 应用投影
             if (projection != null) {
                 rows = applyProjection(rows);
             }
@@ -178,16 +221,11 @@ public class SSTableRecordReader implements FileRecordReader {
         }
     }
     
-    /**
-     * 检查是否可以跳过此 Block
-     */
     private boolean canSkipBlock(BlockInfo blockInfo) {
-        // 基于 minKey/maxKey 进行 Block 级过滤
         if (blockInfo.minKey == null || blockInfo.maxKey == null) {
             return false;
         }
         
-        // 范围过滤
         if (startKey != null && blockInfo.maxKey.compareTo(startKey) < 0) {
             return true;
         }
@@ -195,28 +233,28 @@ public class SSTableRecordReader implements FileRecordReader {
             return true;
         }
         
-        // TODO: 未来可以基于谓词进行更精细的 Block 级过滤
-        // 例如：如果谓词是 age > 30，可以检查 Block 的 maxAge 统计信息
-        
         return false;
     }
     
     /**
-     * 读取 Block 中的所有行
+     * 读取Block中的数据行
+     * 优化逻辑：
+     * 1. 先读取RowIndex
+     * 2. 通过RowIndex中的key进行二分查找
+     * 3. 找到后直接通过offset和length读取指定行数据
      */
     private List<Row> readBlockRows(BlockInfo blockInfo) throws IOException {
         List<Row> rows = new ArrayList<>();
         
         try {
+            // 1. 读取DataBlock
             fileChannel.position(blockInfo.offset);
             
-            // 读取 Block 大小
             ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
             fileChannel.read(sizeBuffer);
             sizeBuffer.flip();
             int blockSize = sizeBuffer.getInt();
             
-            // 读取 Block 数据
             ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
             fileChannel.read(blockBuffer);
             blockBuffer.flip();
@@ -224,30 +262,95 @@ public class SSTableRecordReader implements FileRecordReader {
             byte[] blockBytes = new byte[blockSize];
             blockBuffer.get(blockBytes);
             
-            // 反序列化 Block
             SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
             
-            // 提取行数据，并应用范围过滤
-            for (SSTable.RowData rowData : dataBlock.getRows()) {
-                RowKey rowKey = rowData.getKey();
+            // 2. 读取RowIndex（紧跟在DataBlock后）
+            ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+            fileChannel.read(rowIndexSizeBuffer);
+            rowIndexSizeBuffer.flip();
+            int rowIndexSize = rowIndexSizeBuffer.getInt();
+            
+            ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+            fileChannel.read(rowIndexBuffer);
+            rowIndexBuffer.flip();
+            
+            byte[] rowIndexBytes = new byte[rowIndexSize];
+            rowIndexBuffer.get(rowIndexBytes);
+            
+            List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                rowIndexBytes,
+                objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.RowIndexEntry.class)
+            );
+            
+            // 更新blockInfo的minKey和maxKey
+            if (blockInfo.minKey == null || blockInfo.maxKey == null) {
+                if (!rowIndex.isEmpty()) {
+                    blockInfo.updateKeys(rowIndex.get(0).getKey(), rowIndex.get(rowIndex.size() - 1).getKey());
+                }
+            }
+            
+            // 3. 处理点查询：二分查找 + 直接读取
+            if (isPointQuery && exactKey != null) {
+                SSTable.RowIndexEntry targetEntry = binarySearchRowIndex(rowIndex, exactKey);
+                if (targetEntry != null) {
+                    Row row = dataBlock.getRowByIndex(targetEntry);
+                    if (row != null) {
+                        rows.add(row);
+                    }
+                }
+                return rows;
+            }
+            
+            // 4. 处理范围查询：遍历rowIndex，按需读取
+            for (SSTable.RowIndexEntry entry : rowIndex) {
+                RowKey rowKey = entry.getKey();
                 
-                // 范围过滤
                 if (startKey != null && rowKey.compareTo(startKey) < 0) {
                     continue;
                 }
                 if (endKey != null && rowKey.compareTo(endKey) > 0) {
-                    continue;
+                    break;
                 }
                 
-                rows.add(rowData.getRow());
+                Row row = dataBlock.getRowByIndex(entry);
+                rows.add(row);
             }
             
+        } catch (IOException e) {
+            throw e;
         } catch (Exception e) {
             logger.warn("Failed to read block at offset {}: {}", blockInfo.offset, e.getMessage());
         }
         
         return rows;
     }
+    
+    /**
+     * 在RowIndex中二分查找指定key
+     */
+    private SSTable.RowIndexEntry binarySearchRowIndex(List<SSTable.RowIndexEntry> rowIndex, RowKey targetKey) {
+        int left = 0;
+        int right = rowIndex.size() - 1;
+        
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            SSTable.RowIndexEntry entry = rowIndex.get(mid);
+            RowKey midKey = entry.getKey();
+            
+            int cmp = midKey.compareTo(targetKey);
+            if (cmp == 0) {
+                return entry;
+            } else if (cmp < 0) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        
+        return null;
+    }
+    
+
     
     /**
      * 应用过滤条件
@@ -266,6 +369,9 @@ public class SSTableRecordReader implements FileRecordReader {
      * 应用投影
      */
     private List<Row> applyProjection(List<Row> rows) {
+        if (projection.isAll()) {
+            return rows;
+        }
         List<Row> projected = new ArrayList<>();
         for (Row row : rows) {
             Row projectedRow = projection.project(row, schema);
@@ -274,13 +380,9 @@ public class SSTableRecordReader implements FileRecordReader {
         return projected;
     }
     
-    /**
-     * 构建 Block 迭代器
-     */
     private Iterator<BlockInfo> buildBlockIterator() throws IOException {
         List<BlockInfo> blocks = new ArrayList<>();
         
-        // 从索引中构建 Block 列表
         long position = 0;
         long dataEndPosition = footer.getBloomFilterOffset() > 0 
                 ? footer.getBloomFilterOffset() 
@@ -290,6 +392,7 @@ public class SSTableRecordReader implements FileRecordReader {
             try {
                 fileChannel.position(position);
                 
+                // 读取DataBlock大小
                 ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
                 int bytesRead = fileChannel.read(sizeBuffer);
                 if (bytesRead < 4) {
@@ -308,12 +411,36 @@ public class SSTableRecordReader implements FileRecordReader {
                     break;
                 }
                 
-                // 读取 Block 的 minKey/maxKey（需要反序列化整个 Block）
-                // TODO: 优化 - 在 Block Header 中存储 minKey/maxKey
-                BlockInfo blockInfo = new BlockInfo(position, blockSize, null, null);
+                // 跳过DataBlock，读取RowIndex大小
+                long rowIndexOffsetPos = position + 4 + blockSize;
+                fileChannel.position(rowIndexOffsetPos);
+                
+                ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                bytesRead = fileChannel.read(rowIndexSizeBuffer);
+                if (bytesRead < 4) {
+                    break;
+                }
+                
+                rowIndexSizeBuffer.flip();
+                int rowIndexSize = rowIndexSizeBuffer.getInt();
+                
+                if (rowIndexSize <= 0 || rowIndexSize > 1024 * 1024) {
+                    position += 4 + blockSize;
+                    continue;
+                }
+                
+                BlockInfo blockInfo = new BlockInfo(
+                    position, 
+                    blockSize, 
+                    null, 
+                    null,
+                    rowIndexOffsetPos,
+                    rowIndexSize
+                );
                 blocks.add(blockInfo);
                 
-                position += 4 + blockSize;
+                // 移动到下一个Block：当前position + DataBlock(4+size) + RowIndex(4+size)
+                position += 4 + blockSize + 4 + rowIndexSize;
             } catch (Exception e) {
                 logger.warn("Error building block iterator at position {}: {}", position, e.getMessage());
                 break;
@@ -321,6 +448,84 @@ public class SSTableRecordReader implements FileRecordReader {
         }
         
         return blocks.iterator();
+    }
+    
+    private Iterator<BlockInfo> buildPointQueryIterator(RowKey targetKey) throws IOException {
+        if (footer.getIndexOffset() <= 0) {
+            return buildBlockIterator();
+        }
+        
+        try {
+            List<SSTable.BlockIndexEntry> indexEntries = loadIndexEntries();
+            if (indexEntries == null || indexEntries.isEmpty()) {
+                return buildBlockIterator();
+            }
+            
+            List<BlockInfo> blocks = new ArrayList<>();
+            for (SSTable.BlockIndexEntry entry : indexEntries) {
+                if (entry.mightContainKey(targetKey)) {
+                    blocks.add(new BlockInfo(
+                        entry.getBlockOffset(),
+                        entry.getBlockSize(),
+                        entry.getFirstKey(),
+                        entry.getLastKey(),
+                        entry.getRowIndexOffset(),
+                        entry.getRowIndexSize()
+                    ));
+                    break;
+                }
+            }
+            
+            if (!blocks.isEmpty()) {
+                return blocks.iterator();
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to use index for point query: {}", e.getMessage());
+        }
+        
+        return buildBlockIterator();
+    }
+    
+    private List<SSTable.BlockIndexEntry> loadIndexEntries() throws IOException {
+        try {
+            fileChannel.position(footer.getIndexOffset());
+            
+            ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+            fileChannel.read(sizeBuffer);
+            sizeBuffer.flip();
+            int indexSize = sizeBuffer.getInt();
+            
+            ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
+            fileChannel.read(indexBuffer);
+            indexBuffer.flip();
+            
+            byte[] indexBytes = new byte[indexSize];
+            indexBuffer.get(indexBytes);
+            
+            // 先尝试读取新的BlockIndexEntry格式
+            try {
+                return objectMapper.readValue(
+                        indexBytes, 
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.BlockIndexEntry.class)
+                );
+            } catch (Exception e) {
+                // 向后兼容：尝试读取旧的IndexEntry格式
+                logger.debug("Failed to read BlockIndexEntry, trying legacy IndexEntry format");
+                List<SSTable.IndexEntry> legacyEntries = objectMapper.readValue(
+                        indexBytes, 
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.IndexEntry.class)
+                );
+                // 将IndexEntry转换为BlockIndexEntry
+                List<SSTable.BlockIndexEntry> result = new ArrayList<>();
+                for (SSTable.IndexEntry entry : legacyEntries) {
+                    result.add(entry);
+                }
+                return result;
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to load index entries: {}", e.getMessage());
+            return null;
+        }
     }
     
     /**
@@ -365,20 +570,31 @@ public class SSTableRecordReader implements FileRecordReader {
         return objectMapper.readValue(footerBytes, SSTable.Footer.class);
     }
     
-    /**
-     * Block 信息
-     */
     private static class BlockInfo {
-        final long offset;
-        final int size;
-        final RowKey minKey;
-        final RowKey maxKey;
+        final long offset;          // DataBlock的偏移量
+        final int size;             // DataBlock的大小
+        final long rowIndexOffset;  // RowIndex的偏移量（可选）
+        final int rowIndexSize;     // RowIndex的大小（可选）
+        RowKey minKey;
+        RowKey maxKey;
         
         BlockInfo(long offset, int size, RowKey minKey, RowKey maxKey) {
+            this(offset, size, minKey, maxKey, 0, 0);
+        }
+        
+        BlockInfo(long offset, int size, RowKey minKey, RowKey maxKey,
+                 long rowIndexOffset, int rowIndexSize) {
             this.offset = offset;
             this.size = size;
             this.minKey = minKey;
             this.maxKey = maxKey;
+            this.rowIndexOffset = rowIndexOffset;
+            this.rowIndexSize = rowIndexSize;
+        }
+        
+        void updateKeys(RowKey min, RowKey max) {
+            this.minKey = min;
+            this.maxKey = max;
         }
     }
     

@@ -20,55 +20,67 @@ import java.util.Optional;
  */
 public class FileStoreTable implements Table {
     private static final Logger logger = LoggerFactory.getLogger(FileStoreTable.class);
-    
+
     private final Catalog catalog;
     private final Identifier identifier;
     private final Schema schema;
     private final PathFactory pathFactory;
     private final SnapshotManager snapshotManager;
     private final PartitionManager partitionManager;
-    
+
     public FileStoreTable(Catalog catalog, Identifier identifier, Schema schema, PathFactory pathFactory) {
         this.catalog = catalog;
         this.identifier = identifier;
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.snapshotManager = new SnapshotManager(
-            pathFactory, 
-            identifier.getDatabase(), 
-            identifier.getTable()
+                pathFactory,
+                identifier.getDatabase(),
+                identifier.getTable()
         );
         this.partitionManager = new PartitionManager(
-            pathFactory,
-            identifier.getDatabase(),
-            identifier.getTable(),
-            schema.getPartitionKeys()
+                pathFactory,
+                identifier.getDatabase(),
+                identifier.getTable(),
+                schema.getPartitionKeys()
         );
-        
+
         logger.debug("Created FileStoreTable for {}", identifier);
     }
-    
+
     @Override
     public Identifier identifier() {
         return identifier;
     }
-    
+
     @Override
     public Schema schema() {
         return schema;
     }
-    
+
     @Override
     public TableScan newScan() {
         return new FileStoreTableScan(this);
     }
-    
+
     @Override
     public TableRead newRead() {
-        // 使用一个简单的适配器
-        return new SimpleTableRead(schema, pathFactory, identifier);
+        // 使用 FileStoreTableRead 以支持分区过滤、Manifest缓存、并行读取等优化特性
+        return new FileStoreTableRead(
+                schema,
+                pathFactory,
+                identifier.getDatabase(),
+                identifier.getTable()
+        );
     }
-    
+
+    public TableRead newSimpleRead() {
+        // 使用 FileStoreTableRead 以支持分区过滤、Manifest缓存、并行读取等优化特性
+        return new SimpleTableRead(schema,
+                pathFactory,
+                identifier);
+    }
+
     @Override
     public TableWrite newWrite() {
         try {
@@ -77,12 +89,12 @@ public class FileStoreTable implements Table {
             throw new RuntimeException("Failed to create TableWrite", e);
         }
     }
-    
+
     @Override
     public TableCommit newCommit() {
         return new TableCommit(catalog, pathFactory, identifier);
     }
-    
+
     @Override
     public Optional<Snapshot> latestSnapshot() {
         try {
@@ -95,7 +107,7 @@ public class FileStoreTable implements Table {
             return Optional.empty();
         }
     }
-    
+
     @Override
     public Optional<Snapshot> snapshot(long snapshotId) {
         try {
@@ -106,27 +118,27 @@ public class FileStoreTable implements Table {
             return Optional.empty();
         }
     }
-    
+
     @Override
     public List<Snapshot> snapshots() throws IOException {
         return snapshotManager.getAllSnapshots();
     }
-    
+
     @Override
     public SnapshotManager snapshotManager() {
         return snapshotManager;
     }
-    
+
     @Override
     public PathFactory pathFactory() {
         return pathFactory;
     }
-    
+
     @Override
     public PartitionManager partitionManager() {
         return partitionManager;
     }
-    
+
     public Catalog catalog() {
         return catalog;
     }

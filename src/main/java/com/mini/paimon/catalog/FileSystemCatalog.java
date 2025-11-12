@@ -211,7 +211,7 @@ public class FileSystemCatalog implements Catalog {
                 return;
             }
             
-            // 创建表
+            // 创建表：先创建目录结构，再由 SchemaManager 自动生成 Schema ID
             tableManager.createTable(
                 database, 
                 table, 

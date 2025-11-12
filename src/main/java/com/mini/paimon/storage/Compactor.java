@@ -171,43 +171,60 @@ public class Compactor {
     }
     
     /**
-     * 合并文件
+     * 合并文件（使用多路归并排序）
+     * 
+     * 参考 Paimon 的实现：
+     * 1. 使用 MergeSortedReader 实现流式多路归并
+     * 2. 相同 key 的数据保留最新的（最后一个文件的）
+     * 3. 保证输出文件的有序性
+     * 4. 内存占用可控，避免全量加载
      */
     private List<LeveledSSTable> mergeFiles(List<LeveledSSTable> inputFiles, int targetLevel) 
             throws IOException {
-        // 读取所有输入文件的数据
-        TreeMap<RowKey, Row> mergedData = new TreeMap<>();
+        logger.info("Merging {} files to level {} using multi-way merge sort", inputFiles.size(), targetLevel);
         
+        // 1. 提取所有输入文件路径
+        List<String> sstablePaths = new ArrayList<>();
         for (LeveledSSTable sst : inputFiles) {
-            List<Row> rows = reader.scan(sst.getPath());
-            for (Row row : rows) {
-                RowKey key = schema.hasPrimaryKey() ? 
-                            RowKey.fromRow(row, schema) : 
-                            new RowKey(String.valueOf(System.nanoTime()).getBytes());
-                mergedData.put(key, row);
-            }
+            sstablePaths.add(sst.getPath());
         }
         
-        // 写入新文件
+        // 2. 使用 MergeSortedReader 进行流式归并
         List<LeveledSSTable> outputFiles = new ArrayList<>();
-        
         MemTable memTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
-        for (Map.Entry<RowKey, Row> entry : mergedData.entrySet()) {
-            memTable.put(entry.getValue());
-            
-            // 达到大小限制时刷写
-            if (memTable.getSize() >= memTable.getMaxSize()) {
-                outputFiles.add(flushToLevel(memTable, targetLevel));
-                memTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
+        
+        long mergedCount = 0;
+        
+        try (MergeSortedReader mergeReader = new MergeSortedReader(schema, sstablePaths)) {
+            // 3. 流式读取归并后的数据
+            while (mergeReader.hasNext()) {
+                Row row = mergeReader.next();
+                
+                // 写入数据到 MemTable
+                memTable.put(row);
+                mergedCount++;
+                
+                // 达到大小限制时刷写到目标层级
+                if (memTable.getSize() >= memTable.getMaxSize()) {
+                    outputFiles.add(flushToLevel(memTable, targetLevel));
+                    memTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
+                }
             }
+            
+            // 4. 刷写剩余数据
+            if (!memTable.isEmpty()) {
+                outputFiles.add(flushToLevel(memTable, targetLevel));
+            }
+            
+            logger.info("Merge completed: input={} files, output={} files, merged={} rows",
+                inputFiles.size(), outputFiles.size(), mergedCount);
+            
+            return outputFiles;
+            
+        } catch (IOException e) {
+            logger.error("Failed to merge files", e);
+            throw e;
         }
-        
-        // 刷写剩余数据
-        if (!memTable.isEmpty()) {
-            outputFiles.add(flushToLevel(memTable, targetLevel));
-        }
-        
-        return outputFiles;
     }
     
     /**

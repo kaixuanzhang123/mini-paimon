@@ -14,6 +14,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -30,7 +32,6 @@ public class LSMTree {
     private final String database;
     private final String table;
     private final AtomicLong sequenceGenerator;
-    private final boolean autoSnapshot;  // 是否自动创建快照
     
     private MemTable activeMemTable;
     private MemTable immutableMemTable;
@@ -49,20 +50,15 @@ public class LSMTree {
     private final List<com.mini.paimon.manifest.DataFileMeta> pendingFiles = new ArrayList<>();
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
-        this(schema, pathFactory, database, table, true, true);
-    }
-    
-    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, boolean autoSnapshot) throws IOException {
-        this(schema, pathFactory, database, table, autoSnapshot, true);
+        this(schema, pathFactory, database, table, true);
     }
     
     /**
      * LSMTree 构造函数
-     * @param autoSnapshot 是否自动创建快照
      * @param loadExistingFiles 是否加载现有的 SSTable 文件（分区表的 Bucket 应该设为 false）
      */
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
-                   boolean autoSnapshot, boolean loadExistingFiles) throws IOException {
+                   boolean loadExistingFiles) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
@@ -77,7 +73,6 @@ public class LSMTree {
         this.sstables = new ArrayList<>();
         this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
         this.asyncCompactor = new AsyncCompactor(schema, pathFactory, database, table, sequenceGenerator);
-        this.autoSnapshot = autoSnapshot;
         
         pathFactory.createTableDirectories(database, table);
         
@@ -94,8 +89,8 @@ public class LSMTree {
         Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
         this.wal = new WriteAheadLog(walPath);
         
-        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables, autoSnapshot={}", 
-                   database, table, recoveredCount, sstables.size(), autoSnapshot);
+        logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables", 
+                   database, table, recoveredCount, sstables.size());
     }
     
     /**
@@ -156,35 +151,45 @@ public class LSMTree {
     }
 
     /**
-     * 扫描所有数据
+     * 扫描所有数据（使用归并排序，去重）
      * 
      * @return 所有数据行的列表
      * @throws IOException 读取异常
      */
     public List<Row> scan() throws IOException {
-        List<Row> allRows = new ArrayList<>();
+        // 准备所有数据源（按优先级排序：低到高）
+        List<Iterator<Row>> dataSources = new ArrayList<>();
         
-        // 1. 从活跃内存表中获取数据
-        Map<RowKey, Row> activeData = activeMemTable.getAllData();
-        allRows.addAll(activeData.values());
+        // 1. 从所有 SSTable 中获取数据（按层级从低到高）
+        List<Compactor.LeveledSSTable> sortedSSTables = new ArrayList<>(sstables);
+        sortedSSTables.sort(Comparator.comparingInt(Compactor.LeveledSSTable::getLevel));
         
-        // 2. 从正在刷写的内存表中获取数据
-        if (immutableMemTable != null) {
-            Map<RowKey, Row> immutableData = immutableMemTable.getAllData();
-            allRows.addAll(immutableData.values());
-        }
-        
-        // 3. 从所有SSTable中获取数据
-        for (Compactor.LeveledSSTable sst : sstables) {
+        for (Compactor.LeveledSSTable sst : sortedSSTables) {
             try {
                 List<Row> sstRows = sstReader.scan(sst.getPath());
-                allRows.addAll(sstRows);
+                dataSources.add(sstRows.iterator());
             } catch (Exception e) {
                 logger.warn("Error reading SSTable {}: {}", sst.getPath(), e.getMessage());
             }
         }
         
-        return allRows;
+        // 2. 从正在刷写的内存表中获取数据
+        if (immutableMemTable != null) {
+            Map<RowKey, Row> immutableData = immutableMemTable.getAllData();
+            dataSources.add(immutableData.values().iterator());
+        }
+        
+        // 3. 从活跃内存表中获取数据（最高优先级）
+        Map<RowKey, Row> activeData = activeMemTable.getAllData();
+        dataSources.add(activeData.values().iterator());
+        
+        // 4. 使用 MergeSortedReader 进行多路归并（自动去重）
+        try {
+            return MergeSortedReader.readAllFromIterators(schema, dataSources);
+        } catch (IOException e) {
+            logger.error("Failed to merge scan results", e);
+            throw e;
+        }
     }
 
     /**
@@ -343,6 +348,7 @@ public class LSMTree {
     
     /**
      * 刷写不可变内存表到磁盘
+     * 不再自动创建快照，由两阶段提交统一处理
      */
     private void flushImmutableMemTable() throws IOException {
         if (immutableMemTable == null || immutableMemTable.isEmpty()) {
@@ -361,7 +367,8 @@ public class LSMTree {
             0  // level
         );
         
-        logger.info("Flushed memtable to SSTable: {}", sstPath);
+        logger.info("Flushed memtable to SSTable: {}, minKey={}, maxKey={}", 
+            sstPath, fileMeta.getMinKey(), fileMeta.getMaxKey());
         
         // 添加到SSTable列表
         Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
@@ -375,20 +382,8 @@ public class LSMTree {
             pendingFiles.add(fileMeta);
         }
         
-        // 只有在自动快照模式下才创建快照
-        if (autoSnapshot) {
-            // 创建 Manifest 条目
-            List<ManifestEntry> manifestEntries = new ArrayList<>();
-            ManifestEntry entry = new ManifestEntry(
-                ManifestEntry.FileKind.ADD,
-                0,  // bucket
-                fileMeta
-            );
-            manifestEntries.add(entry);
-            
-            // 创建快照
-            snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
-        }
+        // 关键：不再自动创建快照
+        // autoSnapshot 标志已经废弃，所有快照由 TableCommit 统一管理
         
         // 清理不可变内存表
         immutableMemTable = null;
@@ -494,6 +489,7 @@ public class LSMTree {
 
     /**
      * 关闭 LSM Tree，刷写所有数据
+     * 不再自动创建快照，由两阶段提交统一处理
      */
     public synchronized void close() throws IOException {
         logger.info("Closing LSMTree, flushing all data");
@@ -516,6 +512,9 @@ public class LSMTree {
                 0
             );
             
+            logger.info("Flushed active memtable: {}, minKey={}, maxKey={}",
+                sstPath, fileMeta.getMinKey(), fileMeta.getMaxKey());
+            
             // 添加到SSTable列表
             Compactor.LeveledSSTable sst = new Compactor.LeveledSSTable(
                 sstPath, 0, fileMeta.getMinKey(), fileMeta.getMaxKey(),
@@ -528,20 +527,7 @@ public class LSMTree {
                 pendingFiles.add(fileMeta);
             }
             
-            // 只在自动快照模式下创建快照
-            if (autoSnapshot) {
-                // 创建 Manifest 条目
-                List<ManifestEntry> manifestEntries = new ArrayList<>();
-                ManifestEntry entry = new ManifestEntry(
-                    ManifestEntry.FileKind.ADD,
-                    0,
-                    fileMeta
-                );
-                manifestEntries.add(entry);
-                
-                // 创建快照
-                snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
-            }
+            // 关键：不再自动创建快照
             
             // 删除对应的 WAL 文件（数据已持久化）
             Path currentWalPath = pathFactory.getWalPath(database, table, walSequence.get());
@@ -563,25 +549,15 @@ public class LSMTree {
                 0
             );
             
+            logger.info("Flushed immutable memtable: {}, minKey={}, maxKey={}",
+                sstPath, fileMeta.getMinKey(), fileMeta.getMaxKey());
+            
             // 关键：跟踪新生成的文件元信息，供 prepareCommit 使用
             synchronized (pendingFiles) {
                 pendingFiles.add(fileMeta);
             }
             
-            // 只在自动快照模式下创建快照
-            if (autoSnapshot) {
-                // 创建 Manifest 条目
-                List<ManifestEntry> manifestEntries = new ArrayList<>();
-                ManifestEntry entry = new ManifestEntry(
-                    ManifestEntry.FileKind.ADD,
-                    0,
-                    fileMeta
-                );
-                manifestEntries.add(entry);
-                
-                // 创建快照
-                snapshotManager.createSnapshot(schema.getSchemaId(), manifestEntries);
-            }
+            // 关键：不再自动创建快照
         }
         
         logger.info("LSMTree closed successfully");

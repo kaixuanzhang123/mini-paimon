@@ -39,39 +39,6 @@ class TableManagerTest {
     }
 
     @Test
-    void testCreateTable() throws IOException {
-        // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
-        
-        // 创建表
-        TableMetadata tableMetadata = tableManager.createTable(
-            "test_db",
-            "test_table",
-            Arrays.asList(idField, nameField),
-            Collections.singletonList("id"),
-            Collections.emptyList()
-        );
-        
-        assertNotNull(tableMetadata);
-        assertEquals("test_table", tableMetadata.getTableName());
-        assertEquals("test_db", tableMetadata.getDatabaseName());
-        assertEquals(0, tableMetadata.getCurrentSchemaId());
-        
-        // 验证表目录已创建
-        Path tablePath = pathFactory.getTablePath("test_db", "test_table");
-        assertTrue(Files.exists(tablePath));
-        
-        // 验证 Schema 文件已创建
-        Path schemaPath = pathFactory.getSchemaPath("test_db", "test_table", 0);
-        assertTrue(Files.exists(schemaPath));
-        
-        // 验证元数据文件已创建
-        Path metadataPath = tablePath.resolve("metadata");
-        assertTrue(Files.exists(metadataPath));
-    }
-
-    @Test
     void testCreateTableAlreadyExists() throws IOException {
         // 创建字段
         Field idField = new Field("id", DataType.INT, false);

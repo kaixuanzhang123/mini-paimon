@@ -79,12 +79,18 @@ public class SQLParser {
     
     /**
      * 解析并执行 CREATE TABLE 语句
+     * 支持格式：CREATE TABLE table_name (...) 或 CREATE TABLE database.table_name (...)
      * 
      * @param stmt CREATE TABLE 语句
      * @throws IOException 解析或执行错误
      */
     private void executeCreateTable(SQLCreateTableStatement stmt) throws IOException {
-        String tableName = stmt.getTableSource().toString();
+        String fullTableName = stmt.getTableSource().toString();
+        
+        // 解析表名，支持 database.table 格式
+        Identifier identifier = parseTableIdentifier(fullTableName);
+        String database = identifier.getDatabase();
+        String tableName = identifier.getTable();
         
         List<Field> fields = new ArrayList<>();
         List<String> primaryKeys = new ArrayList<>();
@@ -157,13 +163,32 @@ public class SQLParser {
             }
         }
         
-        // 创建表
-        Identifier identifier = new Identifier("default", tableName);
-        catalog.createTable(identifier, new Schema(0, fields, primaryKeys, partitionKeys), true);
+        // 创建 Schema（不指定 schemaId，由 SchemaManager 自动生成）
+        Schema schema = new Schema(-1, fields, primaryKeys, partitionKeys);
         
-        System.out.println("Table '" + tableName + "' created successfully.");
+        // 创建表
+        catalog.createTable(identifier, schema, true);
+        
+        System.out.println("Table '" + identifier.getFullName() + "' created successfully.");
         if (!partitionKeys.isEmpty()) {
             System.out.println("Partition keys: " + partitionKeys);
+        }
+    }
+    
+    /**
+     * 解析表标识符
+     * 支持格式：table_name（使用默认数据库） 或 database.table_name
+     * 
+     * @param fullTableName 完整表名
+     * @return 表标识符
+     */
+    private Identifier parseTableIdentifier(String fullTableName) {
+        if (fullTableName.contains(".")) {
+            // 使用 Identifier.fromString 解析 database.table 格式
+            return Identifier.fromString(fullTableName);
+        } else {
+            // 没有指定数据库，使用默认数据库
+            return new Identifier(catalog.getDefaultDatabase(), fullTableName);
         }
     }
     
@@ -175,21 +200,22 @@ public class SQLParser {
      * @throws IOException 解析或执行错误
      */
     private void executeDropTable(com.alibaba.druid.sql.ast.statement.SQLDropTableStatement stmt) throws IOException {
-        // 获取表名
+        // 获取表名：尝试多种方法获取完整表名
         com.alibaba.druid.sql.ast.statement.SQLExprTableSource tableSource = stmt.getTableSources().get(0);
-        String tableName = tableSource.getTableName();
+        String fullTableName = tableSource.toString(); // 使用 toString() 获取完整表名（包括数据库名）
         
-        Identifier identifier = new Identifier("default", tableName);
+        // 解析表标识符
+        Identifier identifier = parseTableIdentifier(fullTableName);
         
         // 删除表（会删除整个表目录）
         try {
             catalog.dropTable(identifier, stmt.isIfExists());
-            System.out.println("Table '" + tableName + "' dropped successfully.");
+            System.out.println("Table '" + identifier.getFullName() + "' dropped successfully.");
         } catch (CatalogException e) {
             if (!stmt.isIfExists()) {
                 throw new IOException("Failed to drop table: " + e.getMessage(), e);
             }
-            System.out.println("Table '" + tableName + "' does not exist (ignored).");
+            System.out.println("Table '" + identifier.getFullName() + "' does not exist (ignored).");
         }
     }
     
@@ -200,14 +226,16 @@ public class SQLParser {
      * @throws IOException 解析或执行错误
      */
     private void executeInsert(SQLInsertStatement stmt) throws IOException {
-        String tableName = stmt.getTableName().getSimpleName();
+        String fullTableName = stmt.getTableName().toString();
+        
+        // 解析表标识符
+        Identifier identifier = parseTableIdentifier(fullTableName);
         
         // 获取表的 Schema
-        Identifier identifier = new Identifier("default", tableName);
         Schema schema = catalog.getTableSchema(identifier);
         
         if (schema == null) {
-            throw new IOException("Table '" + tableName + "' not found");
+            throw new IOException("Table '" + identifier.getFullName() + "' not found");
         }
         
         List<Field> fields = schema.getFields();
@@ -260,17 +288,16 @@ public class SQLParser {
             }
         }
         
-        com.mini.paimon.table.Table table = catalog.getTable(new Identifier("default", tableName));
-        try (TableWrite tableWrite = new TableWrite(table, 1000)) {
+        com.mini.paimon.table.Table table = catalog.getTable(identifier);
+        try (TableWrite tableWrite = table.newWrite()) {
             Row row = new Row(rowValues);
             tableWrite.write(row);
             TableWrite.TableCommitMessage commitMessage = tableWrite.prepareCommit();
             
-            TableCommit tableCommit = new TableCommit(catalog, pathFactory, 
-                new Identifier("default", tableName));
+            TableCommit tableCommit = table.newCommit();
             tableCommit.commit(commitMessage, Snapshot.CommitKind.APPEND);
             
-            System.out.println("Data inserted into table '" + tableName + "' successfully.");
+            System.out.println("Data inserted into table '" + identifier.getFullName() + "' successfully.");
         } catch (Exception e) {
             throw new IOException("Failed to insert data: " + e.getMessage(), e);
         }
@@ -298,14 +325,14 @@ public class SQLParser {
         }
         
         SQLExprTableSource tableSource = (SQLExprTableSource) queryBlock.getFrom();
-        String tableName = tableSource.getExpr().toString();
+        String fullTableName = tableSource.getExpr().toString();
         
-        // 2. 获取表的 Schema
-        Identifier identifier = new Identifier("default", tableName);
+        // 2. 解析表标识符并获取表的 Schema
+        Identifier identifier = parseTableIdentifier(fullTableName);
         Schema schema = catalog.getTableSchema(identifier);
         
         if (schema == null) {
-            throw new IOException("Table '" + tableName + "' not found");
+            throw new IOException("Table '" + identifier.getFullName() + "' not found");
         }
         
         // 3. 解析投影（SELECT 字段列表）
@@ -315,11 +342,11 @@ public class SQLParser {
         Predicate predicate = parseWhere(queryBlock, schema);
         
         // 5. 执行查询：DataTableScan -> DataTableRead
-        DataTableScan tableScan = new DataTableScan(pathFactory, "default", tableName, schema);
+        DataTableScan tableScan = new DataTableScan(pathFactory, identifier.getDatabase(), identifier.getTable(), schema);
         DataTableScan.Plan plan = tableScan.plan();
         
         // 修复：正确初始化DataTableRead，传递所有必需的参数
-        DataTableRead tableRead = new DataTableRead(schema, pathFactory, "default", tableName);
+        DataTableRead tableRead = new DataTableRead(schema, pathFactory, identifier.getDatabase(), identifier.getTable());
         if (projection != null) {
             tableRead.withProjection(projection);
         }
@@ -570,14 +597,16 @@ public class SQLParser {
      * @throws IOException 解析或执行错误
      */
     private void executeDelete(SQLDeleteStatement stmt) throws IOException {
-        String tableName = stmt.getTableName().getSimpleName();
+        String fullTableName = stmt.getTableName().toString();
+        
+        // 解析表标识符
+        Identifier identifier = parseTableIdentifier(fullTableName);
         
         // 获取表的 Schema
-        Identifier identifier = new Identifier("default", tableName);
         Schema schema = catalog.getTableSchema(identifier);
         
         if (schema == null) {
-            throw new IOException("Table '" + tableName + "' not found");
+            throw new IOException("Table '" + identifier.getFullName() + "' not found");
         }
         
         // 获取表

@@ -224,11 +224,13 @@ public class SSTableAnalyzer {
                     objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.IndexEntry.class)
             );
             
-            // 转换为 JSON 格式
             for (SSTable.IndexEntry entry : indexEntries) {
                 ObjectNode entryNode = objectMapper.createObjectNode();
-                entryNode.put("key", entry.getKey() != null ? parseRowKey(entry.getKey(), schema) : "");
+                entryNode.put("firstKey", entry.getFirstKey() != null ? parseRowKey(entry.getFirstKey(), schema) : "");
+                entryNode.put("lastKey", entry.getLastKey() != null ? parseRowKey(entry.getLastKey(), schema) : "");
                 entryNode.put("offset", entry.getOffset());
+                entryNode.put("size", entry.getSize());
+                entryNode.put("rowCount", entry.getRowCount());
                 indexArray.add(entryNode);
             }
         } catch (Exception e) {
@@ -295,23 +297,69 @@ public class SSTableAnalyzer {
                     // 反序列化数据块
                     SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
                     
-                    // 添加行信息
-                    ArrayNode rowsArray = objectMapper.createArrayNode();
-                    for (SSTable.RowData rowData : dataBlock.getRows()) {
-                        ObjectNode rowNode = objectMapper.createObjectNode();
-                        rowNode.put("key", rowData.getKey() != null ? parseRowKey(rowData.getKey(), schema) : "");
-                        rowNode.put("value", rowData.getRow() != null ? rowData.getRow().toString() : "");
-                        rowsArray.add(rowNode);
-                    }
+                    // 读取RowIndex（紧跟在DataBlock后）
+                    ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                    fileChannel.read(rowIndexSizeBuffer);
+                    rowIndexSizeBuffer.flip();
+                    int rowIndexSize = rowIndexSizeBuffer.getInt();
                     
-                    blockNode.set("rows", rowsArray);
-                    blockNode.put("rowCount", dataBlock.getRows().size());
+                    if (rowIndexSize > 0 && rowIndexSize < 1024 * 1024) {
+                        ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+                        fileChannel.read(rowIndexBuffer);
+                        rowIndexBuffer.flip();
+                        
+                        byte[] rowIndexBytes = new byte[rowIndexSize];
+                        rowIndexBuffer.get(rowIndexBytes);
+                        
+                        java.util.List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                            rowIndexBytes,
+                            objectMapper.getTypeFactory().constructCollectionType(java.util.List.class, SSTable.RowIndexEntry.class)
+                        );
+                        
+                        // 添加行信息
+                        ArrayNode rowsArray = objectMapper.createArrayNode();
+                        for (SSTable.RowIndexEntry entry : rowIndex) {
+                            ObjectNode rowNode = objectMapper.createObjectNode();
+                            rowNode.put("key", entry.getKey() != null ? parseRowKey(entry.getKey(), schema) : "");
+                            
+                            // 读取实际的行数据
+                            try {
+                                com.mini.paimon.metadata.Row row = dataBlock.getRowByIndex(entry);
+                                rowNode.put("value", row != null ? row.toString() : "");
+                            } catch (Exception ex) {
+                                rowNode.put("value", "Error reading row: " + ex.getMessage());
+                            }
+                            
+                            rowsArray.add(rowNode);
+                        }
+                        
+                        blockNode.set("rows", rowsArray);
+                        blockNode.put("rowCount", rowIndex.size());
+                        blockNode.put("rowIndexOffset", position + 4 + blockSize);
+                        blockNode.put("rowIndexSize", rowIndexSize);
+                    } else {
+                        blockNode.put("error", "Invalid rowIndex size: " + rowIndexSize);
+                    }
                 } catch (Exception e) {
                     blockNode.put("error", "Failed to deserialize data block: " + e.getMessage());
                 }
                 
                 dataBlocksArray.add(blockNode);
+                // 移动到下一个Block：当前position + DataBlock(4+size) + RowIndex(4+size)
                 position += 4 + blockSize;
+                try {
+                    // 跳过RowIndex
+                    fileChannel.position(position);
+                    ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                    fileChannel.read(rowIndexSizeBuffer);
+                    rowIndexSizeBuffer.flip();
+                    int rowIndexSize = rowIndexSizeBuffer.getInt();
+                    if (rowIndexSize > 0 && rowIndexSize < 1024 * 1024) {
+                        position += 4 + rowIndexSize;
+                    }
+                } catch (Exception e) {
+                    // 忽略错误，继续下一个Block
+                }
             } catch (Exception e) {
                 ObjectNode errorNode = objectMapper.createObjectNode();
                 errorNode.put("error", "Error reading data block at position " + position + ": " + e.getMessage());

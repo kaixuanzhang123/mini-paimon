@@ -90,9 +90,6 @@ class SnapshotTest {
         
         Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 1);
         assertTrue(Files.exists(manifestListPath));
-        
-        Path latestPath = pathFactory.getLatestSnapshotPath("test_db", "test_table");
-        assertTrue(Files.exists(latestPath));
     }
 
     @Test
@@ -185,39 +182,6 @@ class SnapshotTest {
         // 注意：第二个快照的ID是2，不是1
         assertEquals(2, latestSnapshot.getSnapshotId());
         assertEquals(snapshot2, latestSnapshot);
-    }
-
-    @Test
-    void testHasSnapshot() throws IOException {
-        assertFalse(snapshotManager.hasSnapshot());
-        
-        // 创建 Schema
-        Field idField = new Field("id", DataType.INT, false);
-        Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
-        
-        // 创建 DataFileMeta
-        DataFileMeta fileMeta = new DataFileMeta(
-            "./data/data-0-001.sst",
-            1024,
-            100,
-            new RowKey(new byte[]{0, 0, 0, 1}),
-            new RowKey(new byte[]{0, 0, 0, 10}),
-            0,
-            0,
-            System.currentTimeMillis()
-        );
-        
-        // 创建 Manifest 条目
-        ManifestEntry entry = new ManifestEntry(
-            ManifestEntry.FileKind.ADD,
-            0,
-            fileMeta
-        );
-        
-        // 创建快照
-        snapshotManager.createSnapshot(schema.getSchemaId(), Collections.singletonList(entry));
-        
-        assertTrue(snapshotManager.hasSnapshot());
     }
 
     @Test

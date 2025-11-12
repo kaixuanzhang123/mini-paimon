@@ -47,6 +47,7 @@ public class SchemaManager {
 
     /**
      * 创建新的 Schema 版本
+     * Schema ID 由系统自动分配：获取当前最大 ID 并加 1
      * 
      * @param fields 字段列表
      * @param primaryKeys 主键列表
@@ -58,6 +59,14 @@ public class SchemaManager {
             java.util.List<Field> fields,
             java.util.List<String> primaryKeys,
             java.util.List<String> partitionKeys) throws IOException {
+        
+        // 自动生成 Schema ID：如果是第一次创建，先查找现有的最大 ID
+        if (currentSchemaId.get() < 0) {
+            int maxId = findMaxSchemaId();
+            if (maxId >= 0) {
+                currentSchemaId.set(maxId);
+            }
+        }
         
         int newSchemaId = currentSchemaId.incrementAndGet();
         Schema newSchema = new Schema(newSchemaId, fields, primaryKeys, partitionKeys);

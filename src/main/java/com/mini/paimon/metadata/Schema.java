@@ -30,6 +30,10 @@ public class Schema {
         this(schemaId, fields, primaryKeys, Collections.emptyList());
     }
 
+    public Schema(int schemaId, List<Field> fields) {
+        this(schemaId, fields, Collections.emptyList(), Collections.emptyList());
+    }
+
     @JsonCreator
     public Schema(
             @JsonProperty("schemaId") int schemaId,

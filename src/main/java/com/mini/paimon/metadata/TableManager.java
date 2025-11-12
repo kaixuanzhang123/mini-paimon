@@ -28,6 +28,10 @@ public class TableManager {
     /**
      * 创建新表
      * 
+     * 参考 Paimon 设计：
+     * - 不在表根目录下创建 metadata 文件
+     * - 表的元数据通过 Schema 文件管理
+     * 
      * @param database 数据库名
      * @param tableName 表名
      * @param fields 字段列表
@@ -59,12 +63,13 @@ public class TableManager {
         // 创建初始 Schema 版本
         Schema initialSchema = schemaManager.createNewSchemaVersion(fields, primaryKeys, partitionKeys);
         
-        // 创建表元数据
+        // 创建表元数据（仅用于内存管理，不持久化）
         TableMetadata tableMetadata = TableMetadata.newBuilder(tableName, database, initialSchema.getSchemaId())
                 .build();
         
-        // 持久化表元数据
-        tableMetadata.persist(pathFactory);
+        // 关键修复：不再持久化 metadata 文件
+        // Paimon 中表的元数据通过 Schema 文件管理
+        // tableMetadata.persist(pathFactory);  // 删除此行
         
         logger.info("Successfully created table {}/{} with schema version {}", 
                    database, tableName, initialSchema.getSchemaId());
@@ -74,6 +79,7 @@ public class TableManager {
 
     /**
      * 获取表元数据
+     * 从 Schema 动态构建，不依赖 metadata 文件
      * 
      * @param database 数据库名
      * @param tableName 表名
@@ -85,7 +91,12 @@ public class TableManager {
             throw new IOException("Table not found: " + database + "." + tableName);
         }
         
-        return TableMetadata.load(pathFactory, database, tableName);
+        // 从 SchemaManager 获取当前 Schema
+        SchemaManager schemaManager = getSchemaManager(database, tableName);
+        Schema currentSchema = schemaManager.getCurrentSchema();
+        
+        // 动态构建 TableMetadata
+        return new TableMetadata(tableName, database, currentSchema.getSchemaId());
     }
 
     /**
@@ -103,12 +114,24 @@ public class TableManager {
     /**
      * 检查表是否存在
      * 
+     * 参考 Paimon 设计：
+     * - 不依赖 metadata 文件
+     * - 通过表目录和 schema 目录的存在性判断
+     * 
      * @param database 数据库名
      * @param tableName 表名
      * @return true 如果表存在，否则 false
      */
     public boolean tableExists(String database, String tableName) {
-        return TableMetadata.exists(pathFactory, database, tableName);
+        // 检查表目录是否存在
+        java.nio.file.Path tablePath = pathFactory.getTablePath(database, tableName);
+        if (!java.nio.file.Files.exists(tablePath)) {
+            return false;
+        }
+        
+        // 检查 schema 目录是否存在
+        java.nio.file.Path schemaDir = pathFactory.getSchemaDir(database, tableName);
+        return java.nio.file.Files.exists(schemaDir);
     }
 
     /**

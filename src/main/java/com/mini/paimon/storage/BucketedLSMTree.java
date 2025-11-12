@@ -28,9 +28,9 @@ public class BucketedLSMTree extends LSMTree {
                           int bucket,
                           int totalBuckets) throws IOException {
         // 调用父类构造函数，使用自定义的 PathFactory
-        // 关键：禁用自动快照，不加载现有文件（因为分区表的文件由 Snapshot 管理）
+        // 关键：不加载现有文件（因为分区表的文件由 Snapshot 管理）
         super(schema, new BucketedPathFactory(pathFactory, database, table, partitionSpec, bucket), 
-              database, table, false, false);  // autoSnapshot=false, loadExistingFiles=false
+              database, table, false);  // loadExistingFiles=false
         
         this.partitionSpec = partitionSpec;
         this.bucket = bucket;

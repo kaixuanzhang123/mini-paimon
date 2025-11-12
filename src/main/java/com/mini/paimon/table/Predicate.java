@@ -129,6 +129,14 @@ public abstract class Predicate {
             this.right = right;
         }
         
+        public Predicate getLeft() {
+            return left;
+        }
+        
+        public Predicate getRight() {
+            return right;
+        }
+        
         @Override
         public boolean test(Row row, Schema schema) {
             return left.test(row, schema) && right.test(row, schema);
@@ -145,6 +153,14 @@ public abstract class Predicate {
         public OrPredicate(Predicate left, Predicate right) {
             this.left = left;
             this.right = right;
+        }
+        
+        public Predicate getLeft() {
+            return left;
+        }
+        
+        public Predicate getRight() {
+            return right;
         }
         
         @Override

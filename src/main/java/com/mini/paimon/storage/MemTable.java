@@ -157,10 +157,11 @@ public class MemTable {
     }
 
     /**
-     * 获取内存表中的所有条目
+     * 获取内存表中的所有条目（有序）
      */
     public Map<RowKey, Row> getEntries() {
-        return Maps.newHashMap(memTable);
+        // 关键修复：返回有序的 Map，保持排序顺序
+        return new ConcurrentSkipListMap<>(memTable);
     }
 
     /**
