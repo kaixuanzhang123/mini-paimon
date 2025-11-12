@@ -287,7 +287,6 @@ public class TableWrite implements AutoCloseable {
     
     /**
      * 中止提交（回滚 Prepare 阶段的操作）
-     * 注意：此方法只能在 Commit 之前调用
      */
     public synchronized void abort() throws IOException {
         if (committed) {
@@ -297,15 +296,6 @@ public class TableWrite implements AutoCloseable {
         logger.info("Aborting write operation for table {}.{}", database, tableName);
         
         try {
-            // 关键逻辑：
-            // 1. 如果已经 prepare 过，LSMTree 已经被 close()，不需要再次关闭
-            // 2. 如果没有 prepare 过，需要关闭 LSMTree 以清理资源
-            // 3. 但是，由于 prepareCommit() 已经调用了 close()，在 close() 时会刷写数据，
-            //    如果再次关闭会导致数据被重复写入
-            // 因此，abort() 不应该再次调用 LSMTree.close()
-            // 只清理状态即可
-            
-            // 清理状态
             prepared = false;
             lastCommitMessage = null;
             
@@ -349,7 +339,20 @@ public class TableWrite implements AutoCloseable {
                 abort();
             }
             
-            // 清理资源
+            // 如果没有 prepare 过，需要关闭 LSMTree 以释放资源
+            if (!prepared) {
+                if (partitionKeys.isEmpty()) {
+                    if (nonPartitionedLsmTree != null) {
+                        nonPartitionedLsmTree.close();
+                    }
+                } else {
+                    for (LSMTree lsmTree : bucketedLsmTrees.values()) {
+                        lsmTree.close();
+                    }
+                }
+            }
+            
+            // 清理引用
             if (partitionKeys.isEmpty()) {
                 nonPartitionedLsmTree = null;
             } else {

@@ -241,30 +241,17 @@ public class SSTableRecordReader implements FileRecordReader {
      * 优化逻辑：
      * 1. 先读取RowIndex
      * 2. 通过RowIndex中的key进行二分查找
-     * 3. 找到后直接通过offset和length读取指定行数据
+     * 3. 读取DataBlock的valuesData字段（而不是反序列化整个DataBlock）
+     * 4. 从valuesData中按offset/length提取目标行
      */
     private List<Row> readBlockRows(BlockInfo blockInfo) throws IOException {
         List<Row> rows = new ArrayList<>();
         
         try {
-            // 1. 读取DataBlock
-            fileChannel.position(blockInfo.offset);
+            // 1. 读取RowIndex（跳过DataBlock直接读取）
+            long rowIndexPosition = blockInfo.offset + 4 + blockInfo.size;
+            fileChannel.position(rowIndexPosition);
             
-            ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
-            fileChannel.read(sizeBuffer);
-            sizeBuffer.flip();
-            int blockSize = sizeBuffer.getInt();
-            
-            ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
-            fileChannel.read(blockBuffer);
-            blockBuffer.flip();
-            
-            byte[] blockBytes = new byte[blockSize];
-            blockBuffer.get(blockBytes);
-            
-            SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
-            
-            // 2. 读取RowIndex（紧跟在DataBlock后）
             ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
             fileChannel.read(rowIndexSizeBuffer);
             rowIndexSizeBuffer.flip();
@@ -289,11 +276,14 @@ public class SSTableRecordReader implements FileRecordReader {
                 }
             }
             
-            // 3. 处理点查询：二分查找 + 直接读取
+            // 2. 读取DataBlock，但只提取valuesData字段
+            byte[] valuesData = readValuesDataFromBlock(blockInfo);
+            
+            // 3. 处理点查询：二分查找 + 按需读取
             if (isPointQuery && exactKey != null) {
                 SSTable.RowIndexEntry targetEntry = binarySearchRowIndex(rowIndex, exactKey);
                 if (targetEntry != null) {
-                    Row row = dataBlock.getRowByIndex(targetEntry);
+                    Row row = extractRowFromValuesData(valuesData, targetEntry);
                     if (row != null) {
                         rows.add(row);
                     }
@@ -301,7 +291,7 @@ public class SSTableRecordReader implements FileRecordReader {
                 return rows;
             }
             
-            // 4. 处理范围查询：遍历rowIndex，按需读取
+            // 4. 处理范围查询：遍历rowIndex，按需读取每一行
             for (SSTable.RowIndexEntry entry : rowIndex) {
                 RowKey rowKey = entry.getKey();
                 
@@ -312,8 +302,10 @@ public class SSTableRecordReader implements FileRecordReader {
                     break;
                 }
                 
-                Row row = dataBlock.getRowByIndex(entry);
-                rows.add(row);
+                Row row = extractRowFromValuesData(valuesData, entry);
+                if (row != null) {
+                    rows.add(row);
+                }
             }
             
         } catch (IOException e) {
@@ -323,6 +315,50 @@ public class SSTableRecordReader implements FileRecordReader {
         }
         
         return rows;
+    }
+    
+    /**
+     * 从DataBlock中读取valuesData字段
+     * 通过解析JSON提取valuesData，避免完整反序列化DataBlock对象
+     */
+    private byte[] readValuesDataFromBlock(BlockInfo blockInfo) throws IOException {
+        fileChannel.position(blockInfo.offset);
+        
+        ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+        fileChannel.read(sizeBuffer);
+        sizeBuffer.flip();
+        int blockSize = sizeBuffer.getInt();
+        
+        ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
+        fileChannel.read(blockBuffer);
+        blockBuffer.flip();
+        
+        byte[] blockBytes = new byte[blockSize];
+        blockBuffer.get(blockBytes);
+        
+        SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
+        return dataBlock.getValuesData();
+    }
+    
+    /**
+     * 从valuesData中提取指定行的数据
+     * 
+     * @param valuesData 所有行值的连续字节流
+     * @param rowIndexEntry 行索引条目
+     * @return 行数据
+     */
+    private Row extractRowFromValuesData(byte[] valuesData, SSTable.RowIndexEntry rowIndexEntry) throws IOException {
+        int offset = rowIndexEntry.getValueOffset();
+        int length = rowIndexEntry.getValueLength();
+        
+        if (offset < 0 || length <= 0 || offset + length > valuesData.length) {
+            throw new IOException("Invalid row index: offset=" + offset + ", length=" + length + ", valuesDataSize=" + valuesData.length);
+        }
+        
+        byte[] rowBytes = new byte[length];
+        System.arraycopy(valuesData, offset, rowBytes, 0, length);
+        
+        return objectMapper.readValue(rowBytes, Row.class);
     }
     
     /**

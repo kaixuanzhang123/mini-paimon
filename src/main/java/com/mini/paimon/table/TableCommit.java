@@ -161,7 +161,7 @@ public class TableCommit {
                 return;
             }
             
-            // 6. 创建 Snapshot
+            // 6. 创建 Snapshot（通过 Manifest 控制数据文件的可见性）
             Snapshot snapshot = snapshotManager.createSnapshot(
                 commitMessage.getSchemaId(), 
                 manifestEntries, 
@@ -213,68 +213,14 @@ public class TableCommit {
     }
     
     /**
-     * 收集 Manifest 条目
-     * 支持分区表：扫描表目录下的所有分区子目录（与 snapshot、manifest 同级）
-     */
-    private List<ManifestEntry> collectManifestEntries() throws IOException {
-        List<ManifestEntry> entries = new ArrayList<>();
-        
-        Path tableDir = pathFactory.getTablePath(identifier.getDatabase(), identifier.getTable());
-        if (!Files.exists(tableDir)) {
-            return entries;
-        }
-        
-        // 递归扫描表目录，查找所有 .sst 文件（包括分区目录）
-        collectSSTFiles(tableDir, tableDir, entries);
-        
-        return entries;
-    }
-    
-    /**
-     * 递归收集 SSTable 文件
-     * @param scanDir 要扫描的目录
-     * @param baseDir 基准目录（用于计算相对路径）
-     * @param entries 收集的条目列表
-     */
-    private void collectSSTFiles(Path scanDir, Path baseDir, List<ManifestEntry> entries) throws IOException {
-        try (java.util.stream.Stream<Path> stream = Files.walk(scanDir)) {
-            stream.filter(path -> path.toString().endsWith(".sst"))
-                .forEach(sstPath -> {
-                    try {
-                        long fileSize = Files.size(sstPath);
-                        // 计算相对于表目录的相对路径
-                        String relativePath = baseDir.relativize(sstPath).toString();
-                        
-                        ManifestEntry entry = ManifestEntry.addFile(
-                            relativePath,  // 使用相对路径，如：dt=2024-01-01/data-0-000.sst
-                            fileSize,
-                            0,
-                            null,
-                            null,
-                            0,
-                            0
-                        );
-                        entries.add(entry);
-                    } catch (IOException e) {
-                        logger.warn("Failed to create manifest entry for {}", sstPath, e);
-                    }
-                });
-        }
-    }
-    
-    /**
-     * 中止提交（清理临时文件）
-     * 
-     * 此方法用于清理在 Prepare 阶段生成的临时文件，
-     * 但由于我们的实现中 Prepare 直接生成正式文件，
-     * 此方法仅做记录。
+     * 中止提交
      * 
      * 注意：
-     * - 生产环境中应该使用临时目录和原子重命名
-     * - 当前实现是简化版本
+     * - Paimon 中数据文件已在 prepareCommit 时写入最终目录
+     * - 通过 Manifest 的可见性控制保证原子性
+     * - abort 不需要删除数据文件，未被 Snapshot 引用的文件对外不可见
      */
     public void abort() {
-        logger.info("Aborting commit for table {} (cleanup temporary resources)", identifier);
-        // TODO: 在完整实现中，这里应该清理临时文件
+        logger.info("Aborting commit for table {}", identifier);
     }
 }

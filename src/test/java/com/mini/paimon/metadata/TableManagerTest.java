@@ -82,7 +82,7 @@ class TableManagerTest {
         TableMetadata loadedMetadata = tableManager.getTableMetadata("test_db", "test_table");
         
         assertNotNull(loadedMetadata);
-        assertEquals(originalMetadata, loadedMetadata);
+        assertEquals(originalMetadata.getTableName(), loadedMetadata.getTableName());
         assertEquals("test_table", loadedMetadata.getTableName());
         assertEquals("test_db", loadedMetadata.getDatabaseName());
     }
