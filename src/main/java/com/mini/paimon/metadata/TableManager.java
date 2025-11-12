@@ -46,6 +46,28 @@ public class TableManager {
             java.util.List<Field> fields,
             java.util.List<String> primaryKeys,
             java.util.List<String> partitionKeys) throws IOException {
+        return createTable(database, tableName, fields, primaryKeys, partitionKeys, new java.util.HashMap<>());
+    }
+    
+    /**
+     * 创建新表（支持索引配置）
+     * 
+     * @param database 数据库名
+     * @param tableName 表名
+     * @param fields 字段列表
+     * @param primaryKeys 主键列表
+     * @param partitionKeys 分区键列表
+     * @param indexConfig 索引配置
+     * @return 表元数据
+     * @throws IOException 创建失败
+     */
+    public synchronized TableMetadata createTable(
+            String database, 
+            String tableName,
+            java.util.List<Field> fields,
+            java.util.List<String> primaryKeys,
+            java.util.List<String> partitionKeys,
+            java.util.Map<String, java.util.List<com.mini.paimon.index.IndexType>> indexConfig) throws IOException {
         
         // 检查表是否已存在
         if (tableExists(database, tableName)) {
@@ -63,13 +85,14 @@ public class TableManager {
         // 创建初始 Schema 版本
         Schema initialSchema = schemaManager.createNewSchemaVersion(fields, primaryKeys, partitionKeys);
         
-        // 创建表元数据（仅用于内存管理，不持久化）
+        // 创建表元数据（仅用于内存管理，包含索引配置但不持久化）
         TableMetadata tableMetadata = TableMetadata.newBuilder(tableName, database, initialSchema.getSchemaId())
+                .indexConfig(indexConfig)
                 .build();
         
         // 关键修复：不再持久化 metadata 文件
         // Paimon 中表的元数据通过 Schema 文件管理
-        // tableMetadata.persist(pathFactory);  // 删除此行
+        // 索引配置保存在内存中，通过 getTableMetadata 获取
         
         logger.info("Successfully created table {}/{} with schema version {}", 
                    database, tableName, initialSchema.getSchemaId());

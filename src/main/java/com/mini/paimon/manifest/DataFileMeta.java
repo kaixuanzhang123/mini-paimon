@@ -2,8 +2,12 @@ package com.mini.paimon.manifest;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.mini.paimon.index.IndexMeta;
 import com.mini.paimon.metadata.RowKey;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Objects;
 
 /**
@@ -35,6 +39,9 @@ public class DataFileMeta {
     
     /** 创建时间 */
     private final long creationTime;
+    
+    /** 索引元信息列表 */
+    private final List<IndexMeta> indexMetas;
 
     @JsonCreator
     public DataFileMeta(
@@ -45,7 +52,8 @@ public class DataFileMeta {
             @JsonProperty("maxKey") RowKey maxKey,
             @JsonProperty("schemaId") int schemaId,
             @JsonProperty("level") int level,
-            @JsonProperty("creationTime") long creationTime) {
+            @JsonProperty("creationTime") long creationTime,
+            @JsonProperty("indexMetas") List<IndexMeta> indexMetas) {
         this.fileName = Objects.requireNonNull(fileName, "File name cannot be null");
         this.fileSize = fileSize;
         this.rowCount = rowCount;
@@ -54,6 +62,22 @@ public class DataFileMeta {
         this.schemaId = schemaId;
         this.level = level;
         this.creationTime = creationTime;
+        this.indexMetas = indexMetas != null ? new ArrayList<>(indexMetas) : new ArrayList<>();
+    }
+    
+    /**
+     * 构造函数（不包含索引）
+     */
+    public DataFileMeta(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            RowKey minKey,
+            RowKey maxKey,
+            int schemaId,
+            int level,
+            long creationTime) {
+        this(fileName, fileSize, rowCount, minKey, maxKey, schemaId, level, creationTime, null);
     }
 
     public String getFileName() {
@@ -86,6 +110,10 @@ public class DataFileMeta {
 
     public long getCreationTime() {
         return creationTime;
+    }
+    
+    public List<IndexMeta> getIndexMetas() {
+        return Collections.unmodifiableList(indexMetas);
     }
     
     /**
@@ -131,12 +159,13 @@ public class DataFileMeta {
                 creationTime == that.creationTime &&
                 fileName.equals(that.fileName) &&
                 Objects.equals(minKey, that.minKey) &&
-                Objects.equals(maxKey, that.maxKey);
+                Objects.equals(maxKey, that.maxKey) &&
+                Objects.equals(indexMetas, that.indexMetas);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(fileName, fileSize, rowCount, minKey, maxKey, schemaId, level, creationTime);
+        return Objects.hash(fileName, fileSize, rowCount, minKey, maxKey, schemaId, level, creationTime, indexMetas);
     }
 
     @Override
@@ -150,6 +179,7 @@ public class DataFileMeta {
                 ", schemaId=" + schemaId +
                 ", level=" + level +
                 ", creationTime=" + creationTime +
+                ", indexCount=" + indexMetas.size() +
                 '}';
     }
 }

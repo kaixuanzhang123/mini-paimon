@@ -2,6 +2,7 @@ package com.mini.paimon.metadata;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.mini.paimon.index.IndexType;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.utils.SerializationUtils;
 
@@ -9,6 +10,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 表元数据
@@ -35,6 +39,9 @@ public class TableMetadata {
     
     /** 表属性（可选） */
     private final java.util.Map<String, String> properties;
+    
+    /** 索引配置：字段名 -> 索引类型列表 */
+    private final java.util.Map<String, java.util.List<IndexType>> indexConfig;
 
     @JsonCreator
     public TableMetadata(
@@ -44,7 +51,8 @@ public class TableMetadata {
             @JsonProperty("createTime") Instant createTime,
             @JsonProperty("lastModifiedTime") Instant lastModifiedTime,
             @JsonProperty("description") String description,
-            @JsonProperty("properties") java.util.Map<String, String> properties) {
+            @JsonProperty("properties") java.util.Map<String, String> properties,
+            @JsonProperty("indexConfig") java.util.Map<String, java.util.List<IndexType>> indexConfig) {
         this.tableName = tableName;
         this.databaseName = databaseName;
         this.currentSchemaId = currentSchemaId;
@@ -52,10 +60,11 @@ public class TableMetadata {
         this.lastModifiedTime = lastModifiedTime != null ? lastModifiedTime : Instant.now();
         this.description = description != null ? description : "";
         this.properties = properties != null ? new java.util.HashMap<>(properties) : new java.util.HashMap<>();
+        this.indexConfig = indexConfig != null ? new java.util.HashMap<>(indexConfig) : new java.util.HashMap<>();
     }
 
     public TableMetadata(String tableName, String databaseName, int currentSchemaId) {
-        this(tableName, databaseName, currentSchemaId, Instant.now(), Instant.now(), "", new java.util.HashMap<>());
+        this(tableName, databaseName, currentSchemaId, Instant.now(), Instant.now(), "", new java.util.HashMap<>(), new java.util.HashMap<>());
     }
 
     /**
@@ -105,6 +114,13 @@ public class TableMetadata {
      */
     public java.util.Map<String, String> getProperties() {
         return new java.util.HashMap<>(properties);
+    }
+    
+    /**
+     * 获取索引配置
+     */
+    public java.util.Map<String, java.util.List<IndexType>> getIndexConfig() {
+        return new java.util.HashMap<>(indexConfig);
     }
 
     /**
@@ -185,6 +201,7 @@ public class TableMetadata {
         private Instant lastModifiedTime;
         private String description;
         private java.util.Map<String, String> properties;
+        private java.util.Map<String, java.util.List<IndexType>> indexConfig;
 
         public Builder(String tableName, String databaseName, int currentSchemaId) {
             this.tableName = tableName;
@@ -194,6 +211,7 @@ public class TableMetadata {
             this.lastModifiedTime = Instant.now();
             this.description = "";
             this.properties = new java.util.HashMap<>();
+            this.indexConfig = new java.util.HashMap<>();
         }
 
         public Builder createTime(Instant createTime) {
@@ -220,11 +238,16 @@ public class TableMetadata {
             this.properties.putAll(properties);
             return this;
         }
+        
+        public Builder indexConfig(java.util.Map<String, java.util.List<IndexType>> indexConfig) {
+            this.indexConfig = indexConfig;
+            return this;
+        }
 
         public TableMetadata build() {
             return new TableMetadata(
                 tableName, databaseName, currentSchemaId,
-                createTime, lastModifiedTime, description, properties
+                createTime, lastModifiedTime, description, properties, indexConfig
             );
         }
     }

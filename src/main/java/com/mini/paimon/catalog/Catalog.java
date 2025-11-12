@@ -1,6 +1,7 @@
 package com.mini.paimon.catalog;
 
 import com.mini.paimon.exception.CatalogException;
+import com.mini.paimon.index.IndexType;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.metadata.TableMetadata;
@@ -92,6 +93,20 @@ public interface Catalog extends Closeable {
      */
     void createTable(Identifier identifier, Schema schema, Map<String, String> options, 
                     boolean ignoreIfExists) throws CatalogException;
+    
+    /**
+     * 创建表（带索引配置）
+     * 
+     * @param identifier 表标识符
+     * @param schema Schema 定义
+     * @param indexConfig 索引配置：字段名 -> 索引类型列表
+     * @param ignoreIfExists 如果已存在是否忽略异常
+     * @throws CatalogException.TableAlreadyExistException 表已存在（当 ignoreIfExists=false 时）
+     * @throws CatalogException.DatabaseNotExistException 数据库不存在
+     */
+    void createTableWithIndex(Identifier identifier, Schema schema, 
+                             Map<String, List<IndexType>> indexConfig, 
+                             boolean ignoreIfExists) throws CatalogException;
     
     /**
      * 删除表

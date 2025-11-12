@@ -3,8 +3,14 @@ package com.mini.paimon.storage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
+import com.mini.paimon.index.BatchIndexBuilder;
+import com.mini.paimon.index.FileIndex;
+import com.mini.paimon.index.IndexFileManager;
+import com.mini.paimon.index.IndexMeta;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,8 +43,20 @@ public class SSTableWriter {
     /** JSON 序列化工具 */
     private final ObjectMapper objectMapper;
     
+    /** 索引文件管理器 */
+    private final IndexFileManager indexFileManager;
+    
+    /** 是否启用索引 */
+    private final boolean indexEnabled;
+    
     public SSTableWriter() {
+        this(null, true);
+    }
+    
+    public SSTableWriter(PathFactory pathFactory, boolean indexEnabled) {
         this.objectMapper = new ObjectMapper();
+        this.indexFileManager = pathFactory != null ? new IndexFileManager(pathFactory) : null;
+        this.indexEnabled = indexEnabled;
     }
 
     /**
@@ -52,6 +70,20 @@ public class SSTableWriter {
      * @throws IOException 写入异常
      */
     public com.mini.paimon.manifest.DataFileMeta flush(MemTable memTable, String filePath, int schemaId, int level) throws IOException {
+        return flush(memTable, filePath, schemaId, level, null, null, null);
+    }
+    
+    /**
+     * 将 MemTable 刷写到 SSTable 文件（支持索引）
+     */
+    public com.mini.paimon.manifest.DataFileMeta flush(
+            MemTable memTable, 
+            String filePath, 
+            int schemaId, 
+            int level,
+            Schema schema,
+            String database,
+            String table) throws IOException {
         logger.info("Flushing MemTable to SSTable: {}", filePath);
         
         // 获取内存表中的所有条目（已按 RowKey 排序）
@@ -108,6 +140,12 @@ public class SSTableWriter {
             // 提取相对路径（去除绝对路径前缀）
             String fileName = Paths.get(filePath).getFileName().toString();
             
+            // 7. 构建并保存索引
+            List<IndexMeta> indexMetaList = new ArrayList<>();
+            if (indexEnabled && schema != null && database != null && table != null && indexFileManager != null) {
+                indexMetaList = buildAndSaveIndexes(entries, schema, database, table, fileName);
+            }
+            
             return new com.mini.paimon.manifest.DataFileMeta(
                 fileName,
                 fileSize,
@@ -116,7 +154,8 @@ public class SSTableWriter {
                 maxKey,
                 schemaId,
                 level,
-                System.currentTimeMillis()
+                System.currentTimeMillis(),
+                indexMetaList
             );
         }
     }
@@ -392,5 +431,51 @@ public class SSTableWriter {
         magicBuffer.putInt(0xCAFEBABE);
         magicBuffer.flip();
         fileChannel.write(magicBuffer);
+    }
+    
+    /**
+     * 构建并保存索引
+     */
+    private List<IndexMeta> buildAndSaveIndexes(
+            Map<RowKey, Row> entries,
+            Schema schema,
+            String database,
+            String table,
+            String dataFileName) throws IOException {
+        
+        List<IndexMeta> indexMetaList = new ArrayList<>();
+        
+        try {
+            // 创建批量索引构建器（为所有字段创建默认索引）
+            BatchIndexBuilder indexBuilder = BatchIndexBuilder.createDefault(schema);
+            
+            // 添加所有行到索引
+            indexBuilder.addRows(entries);
+            
+            // 保存所有索引
+            Map<String, List<FileIndex>> indexes = indexBuilder.getIndexes();
+            for (Map.Entry<String, List<FileIndex>> entry : indexes.entrySet()) {
+                for (FileIndex index : entry.getValue()) {
+                    IndexMeta meta = indexFileManager.saveIndex(index, database, table, dataFileName);
+                    indexMetaList.add(meta);
+                }
+            }
+            
+            logger.info("Built and saved {} indexes for file {}", indexMetaList.size(), dataFileName);
+            
+            // 输出索引统计信息
+            if (logger.isDebugEnabled()) {
+                Map<String, String> stats = indexBuilder.getStatistics();
+                for (Map.Entry<String, String> stat : stats.entrySet()) {
+                    logger.debug("Index stats - {}: {}", stat.getKey(), stat.getValue());
+                }
+            }
+            
+        } catch (Exception e) {
+            logger.error("Failed to build indexes for file {}", dataFileName, e);
+            // 索引构建失败不影响数据写入
+        }
+        
+        return indexMetaList;
     }
 }

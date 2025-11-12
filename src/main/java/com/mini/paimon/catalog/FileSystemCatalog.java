@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -191,6 +192,13 @@ public class FileSystemCatalog implements Catalog {
     @Override
     public void createTable(Identifier identifier, Schema schema, Map<String, String> options,
                           boolean ignoreIfExists) throws CatalogException {
+        createTableWithIndex(identifier, schema, new HashMap<>(), ignoreIfExists);
+    }
+    
+    @Override
+    public void createTableWithIndex(Identifier identifier, Schema schema, 
+                                    Map<String, List<com.mini.paimon.index.IndexType>> indexConfig,
+                                    boolean ignoreIfExists) throws CatalogException {
         checkNotClosed();
         
         String database = identifier.getDatabase();
@@ -211,20 +219,50 @@ public class FileSystemCatalog implements Catalog {
                 return;
             }
             
-            // 创建表：先创建目录结构，再由 SchemaManager 自动生成 Schema ID
-            tableManager.createTable(
+            // 创建表：直接传递索引配置给 TableManager
+            TableMetadata metadata = tableManager.createTable(
                 database, 
                 table, 
                 schema.getFields(), 
                 schema.getPrimaryKeys(),
-                schema.getPartitionKeys()
+                schema.getPartitionKeys(),
+                indexConfig != null ? indexConfig : new HashMap<>()
             );
             
+            // 不再需要额外持久化 metadata 文件
+            // 索引配置已经包含在 metadata 中
+            
             logger.info("Created table: {}", identifier);
+            if (indexConfig != null && !indexConfig.isEmpty()) {
+                logger.info("Index configuration: {}", formatIndexConfig(indexConfig));
+            }
             
         } catch (IOException e) {
             throw new CatalogException("Failed to create table: " + identifier, e);
         }
+    }
+    
+    /**
+     * 格式化索引配置信息用于日志输出
+     */
+    private String formatIndexConfig(Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) {
+        if (indexConfig == null || indexConfig.isEmpty()) {
+            return "none";
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, List<com.mini.paimon.index.IndexType>> entry : indexConfig.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(entry.getKey()).append("[");
+            for (int i = 0; i < entry.getValue().size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append(entry.getValue().get(i).getName());
+            }
+            sb.append("]");
+        }
+        return sb.toString();
     }
     
     @Override

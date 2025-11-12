@@ -1,9 +1,12 @@
 package com.mini.paimon.table;
 
+import com.mini.paimon.index.IndexFileManager;
+import com.mini.paimon.index.IndexSelector;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
 import com.mini.paimon.manifest.ManifestFileMeta;
 import com.mini.paimon.manifest.ManifestList;
+import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
@@ -28,8 +31,10 @@ public class DataTableScan {
     private final String table;
     private final SnapshotManager snapshotManager;
     private final Schema schema;
+    private final IndexFileManager indexFileManager;
     
     private Long snapshotId;
+    private Predicate predicate;
     
     public DataTableScan(PathFactory pathFactory, String database, String table, Schema schema) {
         this.pathFactory = pathFactory;
@@ -37,6 +42,7 @@ public class DataTableScan {
         this.table = table;
         this.schema = schema;
         this.snapshotManager = new SnapshotManager(pathFactory, database, table);
+        this.indexFileManager = new IndexFileManager(pathFactory);
     }
     
     /**
@@ -44,6 +50,14 @@ public class DataTableScan {
      */
     public DataTableScan withSnapshot(long snapshotId) {
         this.snapshotId = snapshotId;
+        return this;
+    }
+    
+    /**
+     * 设置谓词过滤条件
+     */
+    public DataTableScan withPredicate(Predicate predicate) {
+        this.predicate = predicate;
         return this;
     }
     
@@ -72,7 +86,7 @@ public class DataTableScan {
             pathFactory, database, table, snapshot.getSnapshotId());
         
         // 3. 读取所有 Manifest 文件，获取数据文件列表
-        List<ManifestEntry> dataFiles = new ArrayList<>();
+        List<DataFileMeta> dataFileMetas = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : manifestList.getManifestFiles()) {
             // 从文件名中提取ID
             String manifestFileName = manifestFileMeta.getFileName();
@@ -82,9 +96,21 @@ public class DataTableScan {
             // 只收集 ADD 类型的文件
             for (ManifestEntry entry : manifest.getEntries()) {
                 if (entry.getKind() == ManifestEntry.FileKind.ADD) {
-                    dataFiles.add(entry);
+                    dataFileMetas.add(entry.getFile());
                 }
             }
+        }
+        
+        // 4. 使用索引过滤数据文件
+        if (predicate != null) {
+            IndexSelector indexSelector = new IndexSelector(indexFileManager, database, table);
+            dataFileMetas = indexSelector.filterWithIndex(dataFileMetas, predicate);
+        }
+        
+        // 5. 转换为 ManifestEntry 列表
+        List<ManifestEntry> dataFiles = new ArrayList<>();
+        for (DataFileMeta fileMeta : dataFileMetas) {
+            dataFiles.add(new ManifestEntry(ManifestEntry.FileKind.ADD, 0, fileMeta));
         }
         
         logger.info("Scan plan generated: {} data files from snapshot {}", 
