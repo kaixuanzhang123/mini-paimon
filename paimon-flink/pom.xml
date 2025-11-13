@@ -4,12 +4,12 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>com.minipaimon</groupId>
+        <groupId>com.mini.paimon</groupId>
         <artifactId>mini-paimon</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink</artifactId>
+    <artifactId>paimon-flink</artifactId>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
@@ -22,7 +22,7 @@
     <dependencies>
         <!-- Paimon Core Module -->
         <dependency>
-            <groupId>com.minipaimon</groupId>
+            <groupId>com.mini.paimon</groupId>
             <artifactId>paimon</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>

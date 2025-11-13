@@ -91,6 +91,15 @@ public class FileStoreTable implements Table {
     }
 
     @Override
+    public TableWrite newWrite(long writerId) {
+        try {
+            return new TableWrite(this, 1000, writerId);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create TableWrite", e);
+        }
+    }
+
+    @Override
     public TableCommit newCommit() {
         return new TableCommit(catalog, pathFactory, identifier);
     }

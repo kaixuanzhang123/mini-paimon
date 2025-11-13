@@ -51,6 +51,9 @@ public class TableWrite implements AutoCloseable {
     // Bucket 配置（默认 4 个 bucket）
     private final int totalBuckets;
     
+    // Writer ID 用于分布式环境中避免 WAL 文件冲突
+    private final long writerId;
+    
     // 非分区表使用单个 LSMTree
     private LSMTree nonPartitionedLsmTree;
     
@@ -66,6 +69,10 @@ public class TableWrite implements AutoCloseable {
     private volatile TableCommitMessage lastCommitMessage = null;
     
     public TableWrite(Table table, int batchSize) throws IOException {
+        this(table, batchSize, 0L);
+    }
+    
+    public TableWrite(Table table, int batchSize, long writerId) throws IOException {
         this.table = table;
         this.schema = table.schema();
         this.database = table.identifier().getDatabase();
@@ -73,20 +80,21 @@ public class TableWrite implements AutoCloseable {
         this.batchSize = batchSize;
         this.partitionKeys = schema.getPartitionKeys();
         this.totalBuckets = 4;  // 默认 4 个 bucket
+        this.writerId = writerId;
         
         if (partitionKeys.isEmpty()) {
             // 非分区表：使用单个 LSMTree
-            this.nonPartitionedLsmTree = new LSMTree(schema, table.pathFactory(), database, tableName);
+            this.nonPartitionedLsmTree = new LSMTree(schema, table.pathFactory(), database, tableName, true, writerId);
             this.bucketedLsmTrees = null;
             this.partitionBuffers = null;
-            logger.debug("Created TableWrite for non-partitioned table {}.{}", database, tableName);
+            logger.debug("Created TableWrite for non-partitioned table {}.{} with writerId={}", database, tableName, writerId);
         } else {
             // 分区表 + Bucket：为每个（分区，Bucket）组合创建独立的 LSMTree
             this.nonPartitionedLsmTree = null;
             this.bucketedLsmTrees = new ConcurrentHashMap<>();
             this.partitionBuffers = new ConcurrentHashMap<>();
-            logger.debug("Created TableWrite for partitioned table {}.{}, partition keys: {}, buckets: {}", 
-                database, tableName, partitionKeys, totalBuckets);
+            logger.debug("Created TableWrite for partitioned table {}.{}, partition keys: {}, buckets: {}, writerId={}", 
+                database, tableName, partitionKeys, totalBuckets, writerId);
         }
     }
     

@@ -50,7 +50,7 @@ public class LSMTree {
     private final List<com.mini.paimon.manifest.DataFileMeta> pendingFiles = new ArrayList<>();
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
-        this(schema, pathFactory, database, table, true);
+        this(schema, pathFactory, database, table, true, 0L);
     }
     
     /**
@@ -59,6 +59,16 @@ public class LSMTree {
      */
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
                    boolean loadExistingFiles) throws IOException {
+        this(schema, pathFactory, database, table, loadExistingFiles, 0L);
+    }
+    
+    /**
+     * LSMTree 构造函数
+     * @param loadExistingFiles 是否加载现有的 SSTable 文件（分区表的 Bucket 应该设为 false）
+     * @param writerId 唯一的 writer 标识符，用于分布式环境中避免 WAL 文件冲突
+     */
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
+                   boolean loadExistingFiles, long writerId) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
@@ -78,7 +88,7 @@ public class LSMTree {
         
         this.activeMemTable = new MemTable(schema, sequenceGenerator.getAndIncrement());
         
-        int recoveredCount = recoverFromWAL();
+        int recoveredCount = recoverFromWAL(writerId);
         
         // 关键修复：分区表的 Bucket LSMTree 不加载现有文件
         // 因为分区表的数据文件由 Snapshot 管理，而不是直接由 LSMTree 加载
@@ -86,7 +96,8 @@ public class LSMTree {
             loadExistingSSTables();
         }
         
-        Path walPath = pathFactory.getWalPath(database, table, walSequence.get());
+        // 使用 writerId 来创建唯一的 WAL 文件
+        Path walPath = pathFactory.getWalPath(database, table, writerId);
         this.wal = new WriteAheadLog(walPath);
         
         logger.info("LSMTree initialized for table {}/{}, recovered {} rows from WAL, loaded {} SSTables", 
@@ -224,7 +235,7 @@ public class LSMTree {
      * 恢复 WAL 数据
      * 只恢复未持久化到 SSTable 的数据
      */
-    private int recoverFromWAL() throws IOException {
+    private int recoverFromWAL(long writerId) throws IOException {
         int totalRecovered = 0;
         
         // 扫描所有 WAL 文件
@@ -387,6 +398,9 @@ public class LSMTree {
         
         // 清理不可变内存表
         immutableMemTable = null;
+        
+        // 清理对应的WAL文件（数据已持久化到SSTable）
+        cleanupOldWAL();
         
         // 关键修复：立即删除对应的旧 WAL 文件，避免重复恢复
         // 这个 WAL 文件的数据已经持久化到 SSTable，不再需要
@@ -582,6 +596,54 @@ public class LSMTree {
             List<com.mini.paimon.manifest.DataFileMeta> files = new ArrayList<>(pendingFiles);
             pendingFiles.clear();
             return files;
+        }
+    }
+    
+    /**
+     * 清理旧的WAL文件
+     * 在数据持久化到SSTable后调用，删除不再需要的WAL文件
+     */
+    private void cleanupOldWAL() {
+        try {
+            // 获取WAL目录
+            Path walDir = pathFactory.getWalDir(database, table);
+            if (!Files.exists(walDir)) {
+                return;
+            }
+            
+            // 当前活跃的WAL序号
+            long currentWalSeq = walSequence.get();
+            
+            // 扫描并删除旧的WAL文件
+            Files.list(walDir)
+                .filter(path -> path.getFileName().toString().endsWith(".log"))
+                .forEach(walFile -> {
+                    try {
+                        String fileName = walFile.getFileName().toString();
+                        // 解析WAL文件序号
+                        if (fileName.startsWith("wal-") && fileName.endsWith(".log")) {
+                            // 提取序号部分，支持不同格式的WAL文件名
+                            String[] parts = fileName.split("-");
+                            if (parts.length >= 2) {
+                                String seqPart = parts[parts.length - 1].replace(".log", "");
+                                try {
+                                    long walSeq = Long.parseLong(seqPart);
+                                    // 删除比当前WAL序号小的文件（已持久化的数据）
+                                    if (walSeq < currentWalSeq) {
+                                        Files.deleteIfExists(walFile);
+                                        logger.info("Cleaned up old WAL file: {}", walFile);
+                                    }
+                                } catch (NumberFormatException e) {
+                                    // 忽略无法解析序号的文件
+                                }
+                            }
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Failed to delete old WAL file {}: {}", walFile, e.getMessage());
+                    }
+                });
+        } catch (IOException e) {
+            logger.warn("Failed to cleanup old WAL files: {}", e.getMessage());
         }
     }
 }

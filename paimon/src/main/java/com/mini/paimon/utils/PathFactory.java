@@ -94,6 +94,20 @@ public class PathFactory {
     public Path getManifestListPath(String database, String table, long snapshotId) {
         return getManifestDir(database, table).resolve("manifest-list-" + snapshotId);
     }
+    
+    /**
+     * 获取Delta Manifest List文件路径
+     */
+    public Path getDeltaManifestListPath(String database, String table, long snapshotId) {
+        return getManifestDir(database, table).resolve("manifest-list-delta-" + snapshotId);
+    }
+    
+    /**
+     * 获取Base Manifest List文件路径
+     */
+    public Path getBaseManifestListPath(String database, String table, long snapshotId) {
+        return getManifestDir(database, table).resolve("manifest-list-base-" + snapshotId);
+    }
 
     /**
      * 获取Manifest文件路径

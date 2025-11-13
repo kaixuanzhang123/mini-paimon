@@ -33,13 +33,27 @@ public class PaimonPartitionReader implements PartitionReader<InternalRow> {
             TableScan scan = paimonTable.newScan();
             TableScan.Plan plan = scan.plan();
 
-            if (plan == null || plan.files().isEmpty()) {
+            LOG.info("Initializing PaimonPartitionReader for table {}.{}", 
+                     paimonTable.identifier().getDatabase(), paimonTable.identifier().getTable());
+            
+            if (plan == null) {
+                LOG.warn("Scan plan is null");
                 rowIterator = java.util.Collections.emptyIterator();
                 return;
             }
+            
+            if (plan.files().isEmpty()) {
+                LOG.warn("No files found in scan plan");
+                rowIterator = java.util.Collections.emptyIterator();
+                return;
+            }
+            
+            LOG.info("Found {} files in scan plan", plan.files().size());
 
             TableRead read = paimonTable.newRead();
             List<Row> allRows = read.read(plan);
+            
+            LOG.info("Read {} rows from table", allRows.size());
 
             rowIterator = allRows.iterator();
         } catch (Exception e) {

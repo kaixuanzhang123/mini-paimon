@@ -4,12 +4,12 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>com.minipaimon</groupId>
+        <groupId>com.mini.paimon</groupId>
         <artifactId>mini-paimon</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>spark</artifactId>
+    <artifactId>paimon-spark</artifactId>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
@@ -21,9 +21,28 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.minipaimon</groupId>
+            <groupId>com.mini.paimon</groupId>
             <artifactId>paimon</artifactId>
             <version>1.0-SNAPSHOT</version>
+            <exclusions>
+                <!-- 排除 paimon 的 Jackson 依赖，使用 Spark 自带的版本 -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.datatype</groupId>
+                    <artifactId>jackson-datatype-jsr310</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -45,6 +64,20 @@
             <artifactId>spark-catalyst_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- 显式声明 Spark 兼容的 Jackson 版本用于测试 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.13.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>2.13.4</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

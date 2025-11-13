@@ -8,7 +8,7 @@ import org.apache.spark.sql.SparkSession;
 public class SparkPaimonIntegrationTest {
 
     public static void main(String[] args) {
-        String warehousePath = "test_spark_warehouse";
+        String warehousePath = "./test_spark_warehouse";
         
         SparkSession spark = SparkSessionFactory.createSparkSession(warehousePath, "integration-test");
         

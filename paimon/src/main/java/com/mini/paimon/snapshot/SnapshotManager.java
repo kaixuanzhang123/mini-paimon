@@ -125,7 +125,7 @@ public class SnapshotManager {
         deltaManifestList.addManifestFile(deltaMeta);
         
         String deltaListFileName = "manifest-list-delta-" + snapshotId;
-        deltaManifestList.persist(pathFactory, database, table, snapshotId);
+        deltaManifestList.persistDelta(pathFactory, database, table, snapshotId);
         
         // 3. 确定 base manifest list
         String baseManifestListName;
@@ -238,29 +238,7 @@ public class SnapshotManager {
             .mapToLong(entry -> entry.getFile().getRowCount())
             .sum();
     }
-    
-    /**
-     * 计算总记录数（从 ManifestList）
-     */
-    private long calculateTotalRecordCount(ManifestList manifestList) {
-        
-        return manifestList.getManifestFiles().stream()
-            .mapToLong(meta -> {
-                try {
-                    String manifestFileName = meta.getFileName();
-                    // manifestFileName 已经包含 "manifest-" 前缀，直接使用
-                    ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestFileName);
-                    return manifest.getEntries().stream()
-                        .filter(e -> e.getKind() == ManifestEntry.FileKind.ADD)
-                        .mapToLong(e -> e.getFile().getRowCount())
-                        .sum();
-                } catch (IOException e) {
-                    logger.warn("Failed to load manifest file: {}", meta.getFileName(), e);
-                    return 0;
-                }
-            })
-            .sum();
-    }
+
     
     /**
      * 增量模式下计算总记录数
@@ -290,7 +268,6 @@ public class SnapshotManager {
     
     /**
      * 判断是否需要执行 compaction
-     * 
      * 触发条件：
      * 1. Delta 快照数量达到阈值（默认 10 个）
      * 2. 定期触发（每 100 次提交）
@@ -371,7 +348,12 @@ public class SnapshotManager {
         if (baseManifestListName != null) {
             long baseSnapshotId = extractSnapshotIdFromManifestList(baseManifestListName);
             if (baseSnapshotId > 0) {
-                ManifestList baseList = ManifestList.load(pathFactory, database, table, baseSnapshotId);
+                ManifestList baseList;
+                if (baseManifestListName.startsWith("manifest-list-base-")) {
+                    baseList = ManifestList.loadBase(pathFactory, database, table, baseSnapshotId);
+                } else {
+                    baseList = ManifestList.loadDelta(pathFactory, database, table, baseSnapshotId);
+                }
                 mergeManifestListIntoMap(baseList, fileStateMap);
                 logger.debug("Loaded base manifest from snapshot {}, {} active files", 
                             baseSnapshotId, fileStateMap.size());
@@ -390,7 +372,7 @@ public class SnapshotManager {
                 String deltaListName = snap.getDeltaManifestList();
                 if (deltaListName != null) {
                     long deltaSnapshotId = snap.getId();
-                    ManifestList deltaList = ManifestList.load(pathFactory, database, table, deltaSnapshotId);
+                    ManifestList deltaList = ManifestList.loadDelta(pathFactory, database, table, deltaSnapshotId);
                     mergeManifestListIntoMap(deltaList, fileStateMap);
                     logger.debug("Merged delta manifest from snapshot {}, {} active files now", 
                                 deltaSnapshotId, fileStateMap.size());
@@ -426,7 +408,7 @@ public class SnapshotManager {
         baseList.addManifestFile(baseMeta);
         
         String baseListFileName = "manifest-list-base-" + snapshotId;
-        baseList.persist(pathFactory, database, table, snapshotId);
+        baseList.persistBase(pathFactory, database, table, snapshotId);
         
         long duration = System.currentTimeMillis() - startTime;
         logger.info("Compaction completed in {}ms: created base manifest with {} files", 
@@ -579,8 +561,27 @@ public class SnapshotManager {
         }
         
         Snapshot latestSnapshot = getLatestSnapshot();
-        ManifestList manifestList = ManifestList.load(
-            pathFactory, database, table, latestSnapshot.getId());
+        
+        // 根据快照中的 manifest list 名称选择正确的加载方法
+        String manifestListName = latestSnapshot.getDeltaManifestList();
+        if (manifestListName == null || manifestListName.isEmpty()) {
+            manifestListName = latestSnapshot.getBaseManifestList();
+        }
+        
+        ManifestList manifestList;
+        if (manifestListName != null) {
+            long snapshotId = latestSnapshot.getId();
+            if (manifestListName.startsWith("manifest-list-delta-")) {
+                manifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotId);
+            } else if (manifestListName.startsWith("manifest-list-base-")) {
+                manifestList = ManifestList.loadBase(pathFactory, database, table, snapshotId);
+            } else {
+                // 兼容旧格式
+                manifestList = ManifestList.load(pathFactory, database, table, snapshotId);
+            }
+        } else {
+            throw new IOException("No manifest list found in snapshot " + latestSnapshot.getId());
+        }
         
         List<ManifestEntry> activeFiles = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : manifestList.getManifestFiles()) {

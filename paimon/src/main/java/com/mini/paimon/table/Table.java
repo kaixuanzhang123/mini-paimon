@@ -49,6 +49,15 @@ public interface Table {
     TableWrite newWrite();
     
     /**
+     * 创建带有 writer ID 的表写入器
+     * 用于在分布式环境中避免文件冲突
+     * 
+     * @param writerId 唯一的 writer 标识符
+     * @return TableWrite 实例
+     */
+    TableWrite newWrite(long writerId);
+    
+    /**
      * 创建表提交器
      * 用于提交快照
      */

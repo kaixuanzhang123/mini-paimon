@@ -88,8 +88,9 @@ class SnapshotTest {
         Path snapshotPath = pathFactory.getSnapshotPath("test_db", "test_table", 1);
         assertTrue(Files.exists(snapshotPath));
         
-        Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 1);
-        assertTrue(Files.exists(manifestListPath));
+        // 验证 delta manifest list 文件已创建
+        Path deltaManifestListPath = pathFactory.getDeltaManifestListPath("test_db", "test_table", 1);
+        assertTrue(Files.exists(deltaManifestListPath));
     }
 
     @Test

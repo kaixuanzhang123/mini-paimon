@@ -119,9 +119,28 @@ public class TableCommit {
                             identifier.getDatabase(), identifier.getTable());
                         
                         // 读取上一个快照的 manifest list
-                        ManifestList previousManifestList = ManifestList.load(
-                            pathFactory, identifier.getDatabase(), identifier.getTable(), 
-                            previousSnapshot.getId());
+                        String manifestListName = previousSnapshot.getDeltaManifestList();
+                        if (manifestListName == null || manifestListName.isEmpty()) {
+                            manifestListName = previousSnapshot.getBaseManifestList();
+                        }
+                        
+                        ManifestList previousManifestList;
+                        if (manifestListName != null) {
+                            long snapshotId = previousSnapshot.getId();
+                            if (manifestListName.startsWith("manifest-list-delta-")) {
+                                previousManifestList = ManifestList.loadDelta(pathFactory, 
+                                    identifier.getDatabase(), identifier.getTable(), snapshotId);
+                            } else if (manifestListName.startsWith("manifest-list-base-")) {
+                                previousManifestList = ManifestList.loadBase(pathFactory, 
+                                    identifier.getDatabase(), identifier.getTable(), snapshotId);
+                            } else {
+                                // 兼容旧格式
+                                previousManifestList = ManifestList.load(pathFactory, 
+                                    identifier.getDatabase(), identifier.getTable(), snapshotId);
+                            }
+                        } else {
+                            throw new IOException("No manifest list found in previous snapshot " + previousSnapshot.getId());
+                        }
                         
                         // 遍历所有 manifest files，收集所有的 ADD 文件
                         for (ManifestFileMeta manifestMeta : previousManifestList.getManifestFiles()) {

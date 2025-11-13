@@ -88,6 +88,24 @@ public class ManifestList {
         Files.createDirectories(manifestListPath.getParent());
         SerializationUtils.writeToFile(manifestListPath, this);
     }
+    
+    /**
+     * 持久化 Delta Manifest List
+     */
+    public void persistDelta(PathFactory pathFactory, String database, String table, long snapshotId) throws IOException {
+        Path manifestListPath = pathFactory.getDeltaManifestListPath(database, table, snapshotId);
+        Files.createDirectories(manifestListPath.getParent());
+        SerializationUtils.writeToFile(manifestListPath, this);
+    }
+    
+    /**
+     * 持久化 Base Manifest List
+     */
+    public void persistBase(PathFactory pathFactory, String database, String table, long snapshotId) throws IOException {
+        Path manifestListPath = pathFactory.getBaseManifestListPath(database, table, snapshotId);
+        Files.createDirectories(manifestListPath.getParent());
+        SerializationUtils.writeToFile(manifestListPath, this);
+    }
 
     /**
      * 从文件加载 Manifest List
@@ -103,6 +121,28 @@ public class ManifestList {
         Path manifestListPath = pathFactory.getManifestListPath(database, table, snapshotId);
         if (!Files.exists(manifestListPath)) {
             throw new IOException("Manifest list file not found: " + manifestListPath);
+        }
+        return SerializationUtils.readFromFile(manifestListPath, ManifestList.class);
+    }
+    
+    /**
+     * 加载 Delta Manifest List
+     */
+    public static ManifestList loadDelta(PathFactory pathFactory, String database, String table, long snapshotId) throws IOException {
+        Path manifestListPath = pathFactory.getDeltaManifestListPath(database, table, snapshotId);
+        if (!Files.exists(manifestListPath)) {
+            throw new IOException("Delta manifest list file not found: " + manifestListPath);
+        }
+        return SerializationUtils.readFromFile(manifestListPath, ManifestList.class);
+    }
+    
+    /**
+     * 加载 Base Manifest List
+     */
+    public static ManifestList loadBase(PathFactory pathFactory, String database, String table, long snapshotId) throws IOException {
+        Path manifestListPath = pathFactory.getBaseManifestListPath(database, table, snapshotId);
+        if (!Files.exists(manifestListPath)) {
+            throw new IOException("Base manifest list file not found: " + manifestListPath);
         }
         return SerializationUtils.readFromFile(manifestListPath, ManifestList.class);
     }

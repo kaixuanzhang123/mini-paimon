@@ -8,19 +8,24 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 public class PaimonBatch implements Batch {
 
     private final Table paimonTable;
+    private final String warehousePath;
 
-    public PaimonBatch(Table paimonTable) {
+    public PaimonBatch(Table paimonTable, String warehousePath) {
         this.paimonTable = paimonTable;
+        this.warehousePath = warehousePath;
     }
 
     @Override
     public InputPartition[] planInputPartitions() {
-        return new InputPartition[]{new PaimonInputPartition(paimonTable)};
+        // 简单情况下只创建一个分区
+        return new InputPartition[]{new PaimonInputPartition(0)};
     }
 
     @Override
     public PartitionReaderFactory createReaderFactory() {
-        return new PaimonPartitionReaderFactory(paimonTable);
+        String database = paimonTable.identifier().getDatabase();
+        String tableName = paimonTable.identifier().getTable();
+        return new PaimonPartitionReaderFactory(warehousePath, database, tableName);
     }
 }
 

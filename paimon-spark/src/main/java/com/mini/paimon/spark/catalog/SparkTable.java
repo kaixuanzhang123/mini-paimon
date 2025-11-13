@@ -45,32 +45,36 @@ public class SparkTable implements SupportsRead, SupportsWrite {
 
     @Override
     public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
-        return new PaimonScanBuilder(paimonTable);
+        return new PaimonScanBuilder(paimonTable, warehouse);
     }
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new PaimonWriteBuilder(paimonTable, info);
+        return new PaimonWriteBuilder(paimonTable, info, warehouse);
     }
 
     private static class PaimonScanBuilder implements ScanBuilder {
         private final Table paimonTable;
+        private final String warehouse;
 
-        public PaimonScanBuilder(Table paimonTable) {
+        public PaimonScanBuilder(Table paimonTable, String warehouse) {
             this.paimonTable = paimonTable;
+            this.warehouse = warehouse;
         }
 
         @Override
         public org.apache.spark.sql.connector.read.Scan build() {
-            return new PaimonScan(paimonTable);
+            return new PaimonScan(paimonTable, warehouse);
         }
     }
 
     private static class PaimonScan implements org.apache.spark.sql.connector.read.Scan {
         private final Table paimonTable;
+        private final String warehouse;
 
-        public PaimonScan(Table paimonTable) {
+        public PaimonScan(Table paimonTable, String warehouse) {
             this.paimonTable = paimonTable;
+            this.warehouse = warehouse;
         }
 
         @Override
@@ -80,22 +84,26 @@ public class SparkTable implements SupportsRead, SupportsWrite {
 
         @Override
         public org.apache.spark.sql.connector.read.Batch toBatch() {
-            return new PaimonBatch(paimonTable);
+            return new PaimonBatch(paimonTable, warehouse);
         }
     }
 
     private static class PaimonWriteBuilder implements WriteBuilder {
         private final Table paimonTable;
         private final LogicalWriteInfo info;
+        private final String warehouse;
 
-        public PaimonWriteBuilder(Table paimonTable, LogicalWriteInfo info) {
+        public PaimonWriteBuilder(Table paimonTable, LogicalWriteInfo info, String warehouse) {
             this.paimonTable = paimonTable;
             this.info = info;
+            this.warehouse = warehouse;
         }
 
         @Override
         public org.apache.spark.sql.connector.write.BatchWrite buildForBatch() {
-            return new PaimonBatchWrite(paimonTable, info.schema());
+            String database = paimonTable.identifier().getDatabase();
+            String tableName = paimonTable.identifier().getTable();
+            return new PaimonBatchWrite(warehouse, database, tableName, info.schema());
         }
     }
 }

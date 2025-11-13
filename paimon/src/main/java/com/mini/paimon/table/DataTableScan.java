@@ -82,8 +82,27 @@ public class DataTableScan {
                     snapshot.getSnapshotId(), database, table);
         
         // 2. 从快照中读取 ManifestList
-        ManifestList manifestList = ManifestList.load(
-            pathFactory, database, table, snapshot.getSnapshotId());
+        // 优先使用 deltaManifestList，如果不存在则使用 baseManifestList
+        String manifestListName = snapshot.getDeltaManifestList();
+        if (manifestListName == null || manifestListName.isEmpty()) {
+            manifestListName = snapshot.getBaseManifestList();
+        }
+        
+        ManifestList manifestList;
+        if (manifestListName != null) {
+            // 根据文件名类型选择正确的加载方法
+            long snapshotId = snapshot.getSnapshotId();
+            if (manifestListName.startsWith("manifest-list-delta-")) {
+                manifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotId);
+            } else if (manifestListName.startsWith("manifest-list-base-")) {
+                manifestList = ManifestList.loadBase(pathFactory, database, table, snapshotId);
+            } else {
+                // 兼容旧格式
+                manifestList = ManifestList.load(pathFactory, database, table, snapshotId);
+            }
+        } else {
+            throw new IOException("No manifest list found in snapshot " + snapshot.getSnapshotId());
+        }
         
         // 3. 读取所有 Manifest 文件，获取数据文件列表
         List<DataFileMeta> dataFileMetas = new ArrayList<>();

@@ -90,6 +90,40 @@ public class ManifestCacheManager {
     }
     
     /**
+     * 获取Delta ManifestList
+     */
+    public ManifestList getDeltaManifestList(PathFactory pathFactory, String database, 
+                                           String table, long snapshotId) throws IOException {
+        // 使用负数来区分delta类型的缓存键
+        Long cacheKey = -snapshotId;
+        ManifestList cached = manifestListCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        
+        ManifestList manifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotId);
+        manifestListCache.put(cacheKey, manifestList);
+        return manifestList;
+    }
+    
+    /**
+     * 获取Base ManifestList
+     */
+    public ManifestList getBaseManifestList(PathFactory pathFactory, String database, 
+                                          String table, long snapshotId) throws IOException {
+        // 使用大数值偏移来区分base类型的缓存键
+        Long cacheKey = snapshotId + 1000000L;
+        ManifestList cached = manifestListCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        
+        ManifestList manifestList = ManifestList.loadBase(pathFactory, database, table, snapshotId);
+        manifestListCache.put(cacheKey, manifestList);
+        return manifestList;
+    }
+    
+    /**
      * 增量读取Manifest变更
      * 只读取从baseSnapshotId到targetSnapshotId之间的变更
      */
@@ -101,21 +135,41 @@ public class ManifestCacheManager {
         logger.debug("Reading incremental manifest from snapshot {} to {}", 
                     baseSnapshotId, targetSnapshotId);
         
-        // 读取目标快照的ManifestList
-        ManifestList targetManifestList = getManifestList(pathFactory, database, table, targetSnapshotId);
-        
         // 如果没有基准快照，返回全部文件
         if (baseSnapshotId == null) {
+            ManifestList targetManifestList = getDeltaManifestList(pathFactory, database, table, targetSnapshotId);
             List<ManifestEntry> allEntries = loadAllEntries(pathFactory, database, table, targetManifestList);
             return new IncrementalManifest(allEntries, Collections.emptyList());
         }
         
-        // 读取基准快照的ManifestList
-        ManifestList baseManifestList = getManifestList(pathFactory, database, table, baseSnapshotId);
+        // 读取从baseSnapshotId+1到targetSnapshotId的所有delta manifests
+        List<ManifestEntry> newEntries = new ArrayList<>();
+        List<ManifestEntry> deletedEntries = new ArrayList<>();
         
-        // 计算增量变更
-        return computeIncrementalChanges(pathFactory, database, table, 
-                                        baseManifestList, targetManifestList);
+        for (long snapId = baseSnapshotId + 1; snapId <= targetSnapshotId; snapId++) {
+            try {
+                ManifestList deltaList = getDeltaManifestList(pathFactory, database, table, snapId);
+                List<ManifestEntry> entries = loadAllEntries(pathFactory, database, table, deltaList);
+                
+                for (ManifestEntry entry : entries) {
+                    if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                        newEntries.add(entry);
+                    } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
+                        deletedEntries.add(entry);
+                    }
+                }
+                
+                logger.debug("Loaded delta manifest from snapshot {}, {} entries", snapId, entries.size());
+            } catch (IOException e) {
+                logger.warn("Failed to load delta manifest for snapshot {}: {}", snapId, e.getMessage());
+                // 继续处理下一个snapshot
+            }
+        }
+        
+        logger.info("Incremental manifest: {} new entries, {} deleted entries", 
+                   newEntries.size(), deletedEntries.size());
+        
+        return new IncrementalManifest(newEntries, deletedEntries);
     }
     
     /**

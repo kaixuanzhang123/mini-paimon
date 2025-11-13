@@ -31,7 +31,9 @@ public class PaimonDataWriter implements DataWriter<InternalRow> {
         this.schema = schema;
         this.partitionId = partitionId;
         this.taskId = taskId;
-        this.tableWrite = paimonTable.newWrite();
+        
+        // 使用 taskId 作为唯一的 writer ID 来避免 WAL 文件冲突
+        this.tableWrite = paimonTable.newWrite(taskId);
     }
 
     @Override

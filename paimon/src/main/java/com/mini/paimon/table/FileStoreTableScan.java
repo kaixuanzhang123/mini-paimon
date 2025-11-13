@@ -1,6 +1,5 @@
 package com.mini.paimon.table;
 
-import com.mini.paimon.filter.PartitionFilter;
 import com.mini.paimon.filter.PartitionPredicate;
 import com.mini.paimon.manifest.ManifestCacheManager;
 import com.mini.paimon.manifest.ManifestEntry;
@@ -136,43 +135,127 @@ public class FileStoreTableScan implements TableScan {
     /**
      * 读取 base + delta manifests 并合并
      * 这是增量写入模式下的标准读取流程
+     * 
+     * 在增量模式下：
+     * - base manifest list 可能指向一个compacted的base，或者第一个快照的delta
+     * - 需要读取从base snapshot到当前snapshot之间的所有delta manifests
      */
     private List<ManifestEntry> readBasePlusDeltaManifests(Snapshot snapshot) throws IOException {
         java.util.Map<String, ManifestEntry> fileStateMap = new java.util.LinkedHashMap<>();
         
         // 1. 读取 base manifest（如果存在）
         String baseManifestListName = snapshot.getBaseManifestList();
-        if (baseManifestListName != null && !baseManifestListName.isEmpty()) {
+        String deltaManifestListName = snapshot.getDeltaManifestList();
+        long currentSnapshotId = snapshot.getId();
+        
+        logger.debug("Reading manifests for snapshot {}: base={}, delta={}", 
+                    currentSnapshotId, baseManifestListName, deltaManifestListName);
+        
+        // 如果 base 和 delta 是同一个 manifest list（首次提交），只需要读取一次
+        boolean baseAndDeltaSame = baseManifestListName != null && 
+                                   baseManifestListName.equals(deltaManifestListName);
+        
+        if (baseManifestListName != null && !baseManifestListName.isEmpty() && !baseAndDeltaSame) {
             long baseSnapshotId = extractSnapshotIdFromManifestList(baseManifestListName);
+            logger.debug("Extracted base snapshot ID: {} from manifest list name: {}", 
+                        baseSnapshotId, baseManifestListName);
             if (baseSnapshotId > 0) {
-                ManifestList baseList = cacheManager.getManifestList(
+                try {
+                    // 检查base manifest list是否是compacted的base（manifest-list-base-X格式）
+                    boolean isCompactedBase = baseManifestListName.startsWith("manifest-list-base-");
+                    
+                    if (isCompactedBase) {
+                        // 如果是compacted base，直接读取base，然后读取从baseSnapshotId+1到currentSnapshotId-1的所有delta manifests
+                        ManifestList baseList = cacheManager.getBaseManifestList(
+                            table.pathFactory(),
+                            table.identifier().getDatabase(),
+                            table.identifier().getTable(),
+                            baseSnapshotId
+                        );
+                        mergeManifestListIntoMap(baseList, fileStateMap);
+                        logger.info("Loaded compacted base manifest for snapshot {} (from baseSnapshotId {}), {} files", 
+                                  currentSnapshotId, baseSnapshotId, fileStateMap.size());
+                        
+                        // 读取从baseSnapshotId+1到currentSnapshotId-1的所有delta manifests
+                        if (baseSnapshotId < currentSnapshotId - 1) {
+                            logger.debug("Reading delta manifests from {} to {} for compacted base", 
+                                        baseSnapshotId + 1, currentSnapshotId - 1);
+                            for (long snapId = baseSnapshotId + 1; snapId < currentSnapshotId; snapId++) {
+                                try {
+                                    ManifestList deltaList = cacheManager.getDeltaManifestList(
+                                        table.pathFactory(),
+                                        table.identifier().getDatabase(),
+                                        table.identifier().getTable(),
+                                        snapId
+                                    );
+                                    mergeManifestListIntoMap(deltaList, fileStateMap);
+                                    logger.debug("Merged delta manifest from snapshot {}, {} files now", 
+                                               snapId, fileStateMap.size());
+                                } catch (IOException e) {
+                                    logger.warn("Failed to load delta manifest for snapshot {}: {}", snapId, e.getMessage());
+                                    // 继续处理下一个snapshot
+                                }
+                            }
+                            logger.info("Loaded all delta manifests from {} to {} for compacted base, {} files now", 
+                                      baseSnapshotId + 1, currentSnapshotId - 1, fileStateMap.size());
+                        }
+                    } else {
+                        // 如果是delta格式的base（manifest-list-delta-X），需要读取从baseSnapshotId到currentSnapshotId-1的所有delta manifests
+                        logger.debug("Base is delta format, reading all delta manifests from {} to {}", 
+                                    baseSnapshotId, currentSnapshotId - 1);
+                        for (long snapId = baseSnapshotId; snapId < currentSnapshotId; snapId++) {
+                            try {
+                                ManifestList deltaList = cacheManager.getDeltaManifestList(
+                                    table.pathFactory(),
+                                    table.identifier().getDatabase(),
+                                    table.identifier().getTable(),
+                                    snapId
+                                );
+                                mergeManifestListIntoMap(deltaList, fileStateMap);
+                                logger.debug("Merged delta manifest from snapshot {}, {} files now", 
+                                           snapId, fileStateMap.size());
+                            } catch (IOException e) {
+                                logger.warn("Failed to load delta manifest for snapshot {}: {}", snapId, e.getMessage());
+                                // 继续处理下一个snapshot
+                            }
+                        }
+                        logger.info("Loaded all delta manifests from {} to {} for snapshot {}, {} files", 
+                                  baseSnapshotId, currentSnapshotId - 1, currentSnapshotId, fileStateMap.size());
+                    }
+                } catch (IOException e) {
+                    logger.error("Failed to load base manifest list {} (baseSnapshotId={}): {}", 
+                                baseManifestListName, baseSnapshotId, e.getMessage(), e);
+                    // 如果base manifest加载失败，继续尝试加载delta
+                }
+            } else {
+                logger.warn("Failed to extract base snapshot ID from manifest list name: {}", baseManifestListName);
+            }
+        } else if (baseAndDeltaSame) {
+            logger.debug("Base and delta are the same for snapshot {}, will only read delta", currentSnapshotId);
+        }
+        
+        // 2. 读取当前快照的 delta manifest（如果存在）
+        if (deltaManifestListName != null && !deltaManifestListName.isEmpty()) {
+            long deltaSnapshotId = currentSnapshotId;
+            try {
+                ManifestList deltaList = cacheManager.getDeltaManifestList(
                     table.pathFactory(),
                     table.identifier().getDatabase(),
                     table.identifier().getTable(),
-                    baseSnapshotId
+                    deltaSnapshotId
                 );
-                mergeManifestListIntoMap(baseList, fileStateMap);
-                logger.debug("Loaded base manifest for snapshot {}, {} files", 
-                            baseSnapshotId, fileStateMap.size());
+                mergeManifestListIntoMap(deltaList, fileStateMap);
+                logger.info("Merged delta manifest for snapshot {}, {} files now", 
+                           deltaSnapshotId, fileStateMap.size());
+            } catch (IOException e) {
+                logger.error("Failed to load delta manifest list for snapshot {}: {}", 
+                            deltaSnapshotId, e.getMessage(), e);
+                throw e;
             }
         }
         
-        // 2. 读取 delta manifest（如果存在）
-        String deltaManifestListName = snapshot.getDeltaManifestList();
-        if (deltaManifestListName != null && !deltaManifestListName.isEmpty()) {
-            long deltaSnapshotId = snapshot.getId();
-            ManifestList deltaList = cacheManager.getManifestList(
-            table.pathFactory(),
-            table.identifier().getDatabase(),
-            table.identifier().getTable(),
-                deltaSnapshotId
-            );
-            mergeManifestListIntoMap(deltaList, fileStateMap);
-            logger.debug("Merged delta manifest for snapshot {}, {} files now", 
-                        deltaSnapshotId, fileStateMap.size());
-        }
-        
         // 3. 返回所有活跃文件
+        logger.info("Final file count for snapshot {}: {} files", currentSnapshotId, fileStateMap.size());
         return new ArrayList<>(fileStateMap.values());
     }
     
@@ -184,24 +267,32 @@ public class FileStoreTableScan implements TableScan {
             throws IOException {
         for (ManifestFileMeta meta : manifestList.getManifestFiles()) {
             String manifestId = meta.getFileName();
+            // 确保去掉"manifest-"前缀，因为getManifestFile会处理前缀
             if (manifestId.startsWith("manifest-")) {
                 manifestId = manifestId.substring("manifest-".length());
             }
             
-            ManifestFile manifestFile = cacheManager.getManifestFile(
-                table.pathFactory(),
-                table.identifier().getDatabase(),
-                table.identifier().getTable(),
-                manifestId
-            );
-            
-            for (ManifestEntry entry : manifestFile.getEntries()) {
-                String fileName = entry.getFile().getFileName();
-                if (entry.getKind() == ManifestEntry.FileKind.ADD) {
-                    fileStateMap.put(fileName, entry);
-                } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
-                    fileStateMap.remove(fileName);
+            try {
+                ManifestFile manifestFile = cacheManager.getManifestFile(
+                    table.pathFactory(),
+                    table.identifier().getDatabase(),
+                    table.identifier().getTable(),
+                    manifestId
+                );
+                
+                for (ManifestEntry entry : manifestFile.getEntries()) {
+                    String fileName = entry.getFile().getFileName();
+                    if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                        fileStateMap.put(fileName, entry);
+                    } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
+                        fileStateMap.remove(fileName);
+                    }
                 }
+            } catch (IOException e) {
+                logger.warn("Failed to load manifest file {}: {}, skipping", manifestId, e.getMessage());
+                // 如果manifest文件不存在，可能是已经被删除或清理，跳过这个manifest
+                // 这在增量模式下是正常的，因为旧的manifest可能已经被compaction清理
+                continue;
             }
         }
     }
@@ -210,13 +301,24 @@ public class FileStoreTableScan implements TableScan {
      * 从 manifest list 文件名中提取快照 ID
      */
     private long extractSnapshotIdFromManifestList(String manifestListName) {
+        if (manifestListName == null || manifestListName.isEmpty()) {
+            return -1;
+        }
         try {
+            // 处理 "manifest-list-delta-X" 格式
             if (manifestListName.startsWith("manifest-list-delta-")) {
-                return Long.parseLong(manifestListName.substring("manifest-list-delta-".length()));
-            } else if (manifestListName.startsWith("manifest-list-base-")) {
-                return Long.parseLong(manifestListName.substring("manifest-list-base-".length()));
-            } else if (manifestListName.startsWith("manifest-list-")) {
-                return Long.parseLong(manifestListName.substring("manifest-list-".length()));
+                String idStr = manifestListName.substring("manifest-list-delta-".length());
+                return Long.parseLong(idStr);
+            } 
+            // 处理 "manifest-list-base-X" 格式
+            else if (manifestListName.startsWith("manifest-list-base-")) {
+                String idStr = manifestListName.substring("manifest-list-base-".length());
+                return Long.parseLong(idStr);
+            } 
+            // 处理 "manifest-list-X" 格式（兼容旧格式）
+            else if (manifestListName.startsWith("manifest-list-")) {
+                String idStr = manifestListName.substring("manifest-list-".length());
+                return Long.parseLong(idStr);
             }
         } catch (NumberFormatException e) {
             logger.warn("Failed to extract snapshot ID from manifest list: {}", manifestListName, e);
