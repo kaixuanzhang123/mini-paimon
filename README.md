@@ -1,6 +1,14 @@
 # Mini Paimon - 简化版 Apache Paimon 存储引擎
 
-本项目是一个教学性质的简化版 Apache Paimon，实现了 LSM Tree 存储引擎的核心功能。
+本项目是一个教学性质的简化版 Apache Paimon，实现了 LSM Tree 存储引擎的核心功能，并提供了 Flink 和 Spark 计算引擎的集成支持。
+
+## 模块说明
+
+本项目包含以下模块：
+
+- **paimon**: 核心存储引擎，实现 LSM Tree、Schema 管理、Snapshot 机制等
+- **flink**: Flink 集成模块，提供 Flink SQL 访问 Paimon 表的能力
+- **spark**: Spark 集成模块，提供 Spark SQL 访问 Paimon 表的能力
 
 # Mini-Paimon 架构设计
 

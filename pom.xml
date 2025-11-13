@@ -11,6 +11,7 @@
     <modules>
         <module>paimon</module>
         <module>flink</module>
+        <module>spark</module>
     </modules>
 
     <properties>
