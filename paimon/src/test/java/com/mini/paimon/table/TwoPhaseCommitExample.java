@@ -47,9 +47,9 @@ public class TwoPhaseCommitExample {
             Schema schema = new Schema(
                 1,
                 Arrays.asList(
-                    new Field("id", DataType.INT, false),
-                    new Field("name", DataType.STRING, false),
-                    new Field("age", DataType.INT, false)
+                    new Field("id", DataType.INT(), false),
+                    new Field("name", DataType.STRING(), false),
+                    new Field("age", DataType.INT(), false)
                 ),
                 Arrays.asList("id"),
                 Arrays.asList()

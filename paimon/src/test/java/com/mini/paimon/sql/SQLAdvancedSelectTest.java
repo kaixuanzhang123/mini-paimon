@@ -39,9 +39,9 @@ public class SQLAdvancedSelectTest {
             Identifier identifier = new Identifier("default", "users");
             // 创建Schema
             List<Field> fields = new ArrayList<>();
-            fields.add(new Field("id", DataType.INT, false));
-            fields.add(new Field("name", DataType.STRING, true));
-            fields.add(new Field("age", DataType.INT, true));
+            fields.add(new Field("id", DataType.INT(), false));
+            fields.add(new Field("name", DataType.STRING(), true));
+            fields.add(new Field("age", DataType.INT(), true));
 
             List<String> primaryKeys = Arrays.asList("id");
 

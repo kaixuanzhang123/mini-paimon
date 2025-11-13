@@ -46,8 +46,8 @@ public class AtomicCommitTest {
             
             Identifier identifier = new Identifier("default", "test_table");
             List<Field> fields = new ArrayList<>();
-            fields.add(new Field("id", DataType.INT, false));
-            fields.add(new Field("name", DataType.STRING, true));
+            fields.add(new Field("id", DataType.INT(), false));
+            fields.add(new Field("name", DataType.STRING(), true));
             
             Schema schema = new Schema(0, fields, Arrays.asList("id"), new ArrayList<>());
             catalog.createTable(identifier, schema, true);

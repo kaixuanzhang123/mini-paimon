@@ -14,8 +14,8 @@ class SchemaTest {
 
     @Test
     void testCreateSchema() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), 
                 Collections.singletonList("id"));
@@ -28,7 +28,7 @@ class SchemaTest {
 
     @Test
     void testSchemaValidation() {
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 测试主键字段不存在
         assertThrows(IllegalArgumentException.class, () -> {
@@ -51,8 +51,8 @@ class SchemaTest {
 
     @Test
     void testGetField() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), 
                 Collections.singletonList("id"));
@@ -64,8 +64,8 @@ class SchemaTest {
 
     @Test
     void testGetFieldIndex() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), 
                 Collections.singletonList("id"));

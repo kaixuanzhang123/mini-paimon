@@ -514,35 +514,29 @@ public class DataTableRead {
         }
         
         try {
-            switch (dataType) {
-                case INT:
-                    if (value instanceof Integer) {
-                        return new RowKey(java.nio.ByteBuffer.allocate(4)
-                            .putInt((Integer) value).array());
-                    }
-                    break;
-                case LONG:
-                    if (value instanceof Long) {
-                        return new RowKey(java.nio.ByteBuffer.allocate(8)
-                            .putLong((Long) value).array());
-                    }
-                    break;
-                case STRING:
-                    if (value instanceof String) {
-                        return new RowKey(((String) value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    }
-                    break;
-                case DOUBLE:
-                    if (value instanceof Double) {
-                        return new RowKey(java.nio.ByteBuffer.allocate(8)
-                            .putDouble((Double) value).array());
-                    }
-                    break;
-                case BOOLEAN:
-                    if (value instanceof Boolean) {
-                        return new RowKey(new byte[]{(byte) ((Boolean) value ? 1 : 0)});
-                    }
-                    break;
+            if (dataType instanceof com.mini.paimon.metadata.DataType.IntType) {
+                if (value instanceof Integer) {
+                    return new RowKey(java.nio.ByteBuffer.allocate(4)
+                        .putInt((Integer) value).array());
+                }
+            } else if (dataType instanceof com.mini.paimon.metadata.DataType.LongType) {
+                if (value instanceof Long) {
+                    return new RowKey(java.nio.ByteBuffer.allocate(8)
+                        .putLong((Long) value).array());
+                }
+            } else if (dataType instanceof com.mini.paimon.metadata.DataType.StringType) {
+                if (value instanceof String) {
+                    return new RowKey(((String) value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            } else if (dataType instanceof com.mini.paimon.metadata.DataType.DoubleType) {
+                if (value instanceof Double) {
+                    return new RowKey(java.nio.ByteBuffer.allocate(8)
+                        .putDouble((Double) value).array());
+                }
+            } else if (dataType instanceof com.mini.paimon.metadata.DataType.BooleanType) {
+                if (value instanceof Boolean) {
+                    return new RowKey(new byte[]{(byte) ((Boolean) value ? 1 : 0)});
+                }
             }
         } catch (Exception e) {
             logger.warn("Failed to serialize value: {} of type {}", value, dataType, e);

@@ -28,10 +28,10 @@ public class SchemaManagementExample {
             
             // 3. 定义字段
             logger.info("\n3. Defining fields...");
-            Field idField = new Field("id", DataType.INT, false);
-            Field nameField = new Field("name", DataType.STRING, true);
-            Field ageField = new Field("age", DataType.INT, true);
-            Field emailField = new Field("email", DataType.STRING, true);
+            Field idField = new Field("id", DataType.INT(), false);
+            Field nameField = new Field("name", DataType.STRING(), true);
+            Field ageField = new Field("age", DataType.INT(), true);
+            Field emailField = new Field("email", DataType.STRING(), true);
             
             // 4. 创建表
             logger.info("\n4. Creating table...");

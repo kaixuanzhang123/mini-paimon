@@ -45,10 +45,10 @@ public class CatalogExample {
             Identifier userTable = new Identifier("test_db", "users");
             
             List<Field> fields = Arrays.asList(
-                new Field("user_id", DataType.INT, false),
-                new Field("username", DataType.STRING, false),
-                new Field("email", DataType.STRING, true),
-                new Field("age", DataType.INT, true)
+                new Field("user_id", DataType.INT(), false),
+                new Field("username", DataType.STRING(), false),
+                new Field("email", DataType.STRING(), true),
+                new Field("age", DataType.INT(), true)
             );
             
             Schema schema = new Schema(
@@ -82,11 +82,11 @@ public class CatalogExample {
             // 7. Schema 演化 - 添加新字段
             logger.info("\n=== Step 7: Alter Table (Schema Evolution) ===");
             List<Field> newFields = Arrays.asList(
-                new Field("user_id", DataType.INT, false),
-                new Field("username", DataType.STRING, false),
-                new Field("email", DataType.STRING, true),
-                new Field("age", DataType.INT, true),
-                new Field("create_time", DataType.LONG, true)  // 新增字段
+                new Field("user_id", DataType.INT(), false),
+                new Field("username", DataType.STRING(), false),
+                new Field("email", DataType.STRING(), true),
+                new Field("age", DataType.INT(), true),
+                new Field("create_time", DataType.LONG(), true)  // 新增字段
             );
             
             Schema newSchema = catalog.alterTable(
@@ -115,10 +115,10 @@ public class CatalogExample {
             Identifier orderTable = new Identifier("test_db", "orders");
             
             List<Field> orderFields = Arrays.asList(
-                new Field("order_id", DataType.STRING, false),
-                new Field("user_id", DataType.INT, false),
-                new Field("amount", DataType.DOUBLE, false),
-                new Field("status", DataType.STRING, false)
+                new Field("order_id", DataType.STRING(), false),
+                new Field("user_id", DataType.INT(), false),
+                new Field("amount", DataType.DOUBLE(), false),
+                new Field("status", DataType.STRING(), false)
             );
             
             Schema orderSchema = new Schema(

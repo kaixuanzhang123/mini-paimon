@@ -28,6 +28,9 @@ public class TableMetadata {
     /** 当前 Schema ID */
     private final int currentSchemaId;
     
+    /** 表类型 */
+    private final TableType tableType;
+    
     /** 创建时间 */
     private final Instant createTime;
     
@@ -48,6 +51,7 @@ public class TableMetadata {
             @JsonProperty("tableName") String tableName,
             @JsonProperty("databaseName") String databaseName,
             @JsonProperty("currentSchemaId") int currentSchemaId,
+            @JsonProperty("tableType") TableType tableType,
             @JsonProperty("createTime") Instant createTime,
             @JsonProperty("lastModifiedTime") Instant lastModifiedTime,
             @JsonProperty("description") String description,
@@ -56,6 +60,7 @@ public class TableMetadata {
         this.tableName = tableName;
         this.databaseName = databaseName;
         this.currentSchemaId = currentSchemaId;
+        this.tableType = tableType != null ? tableType : TableType.APPEND_ONLY;
         this.createTime = createTime != null ? createTime : Instant.now();
         this.lastModifiedTime = lastModifiedTime != null ? lastModifiedTime : Instant.now();
         this.description = description != null ? description : "";
@@ -64,7 +69,11 @@ public class TableMetadata {
     }
 
     public TableMetadata(String tableName, String databaseName, int currentSchemaId) {
-        this(tableName, databaseName, currentSchemaId, Instant.now(), Instant.now(), "", new java.util.HashMap<>(), new java.util.HashMap<>());
+        this(tableName, databaseName, currentSchemaId, TableType.APPEND_ONLY, Instant.now(), Instant.now(), "", new java.util.HashMap<>(), new java.util.HashMap<>());
+    }
+    
+    public TableMetadata(String tableName, String databaseName, int currentSchemaId, TableType tableType) {
+        this(tableName, databaseName, currentSchemaId, tableType, Instant.now(), Instant.now(), "", new java.util.HashMap<>(), new java.util.HashMap<>());
     }
 
     /**
@@ -86,6 +95,13 @@ public class TableMetadata {
      */
     public int getCurrentSchemaId() {
         return currentSchemaId;
+    }
+    
+    /**
+     * 获取表类型
+     */
+    public TableType getTableType() {
+        return tableType;
     }
 
     /**
@@ -197,6 +213,7 @@ public class TableMetadata {
         private String tableName;
         private String databaseName;
         private int currentSchemaId;
+        private TableType tableType;
         private Instant createTime;
         private Instant lastModifiedTime;
         private String description;
@@ -207,11 +224,17 @@ public class TableMetadata {
             this.tableName = tableName;
             this.databaseName = databaseName;
             this.currentSchemaId = currentSchemaId;
+            this.tableType = TableType.APPEND_ONLY;
             this.createTime = Instant.now();
             this.lastModifiedTime = Instant.now();
             this.description = "";
             this.properties = new java.util.HashMap<>();
             this.indexConfig = new java.util.HashMap<>();
+        }
+        
+        public Builder tableType(TableType tableType) {
+            this.tableType = tableType;
+            return this;
         }
 
         public Builder createTime(Instant createTime) {
@@ -246,7 +269,7 @@ public class TableMetadata {
 
         public TableMetadata build() {
             return new TableMetadata(
-                tableName, databaseName, currentSchemaId,
+                tableName, databaseName, currentSchemaId, tableType,
                 createTime, lastModifiedTime, description, properties, indexConfig
             );
         }

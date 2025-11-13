@@ -46,10 +46,10 @@ public class SQLPartitionDeleteExample {
             // 先手动创建带分区的表
             com.mini.paimon.catalog.Identifier identifier1 = new com.mini.paimon.catalog.Identifier("default", "user_events");
             List<com.mini.paimon.metadata.Field> fields1 = new ArrayList<>();
-            fields1.add(new com.mini.paimon.metadata.Field("user_id", com.mini.paimon.metadata.DataType.INT, false));
-            fields1.add(new com.mini.paimon.metadata.Field("event_type", com.mini.paimon.metadata.DataType.STRING, true));
-            fields1.add(new com.mini.paimon.metadata.Field("event_time", com.mini.paimon.metadata.DataType.INT, true));
-            fields1.add(new com.mini.paimon.metadata.Field("dt", com.mini.paimon.metadata.DataType.STRING, false));
+            fields1.add(new com.mini.paimon.metadata.Field("user_id", com.mini.paimon.metadata.DataType.INT(), false));
+            fields1.add(new com.mini.paimon.metadata.Field("event_type", com.mini.paimon.metadata.DataType.STRING(), true));
+            fields1.add(new com.mini.paimon.metadata.Field("event_time", com.mini.paimon.metadata.DataType.INT(), true));
+            fields1.add(new com.mini.paimon.metadata.Field("dt", com.mini.paimon.metadata.DataType.STRING(), false));
 
             List<String> primaryKeys1 = Arrays.asList("user_id");
             List<String> partitionKeys1 = Arrays.asList("dt");
@@ -110,10 +110,10 @@ public class SQLPartitionDeleteExample {
 
             com.mini.paimon.catalog.Identifier identifier2 = new com.mini.paimon.catalog.Identifier("default", "user_behavior");
             List<com.mini.paimon.metadata.Field> fields2 = new ArrayList<>();
-            fields2.add(new com.mini.paimon.metadata.Field("user_id", com.mini.paimon.metadata.DataType.INT, false));
-            fields2.add(new com.mini.paimon.metadata.Field("action", com.mini.paimon.metadata.DataType.STRING, true));
-            fields2.add(new com.mini.paimon.metadata.Field("dt", com.mini.paimon.metadata.DataType.STRING, false));
-            fields2.add(new com.mini.paimon.metadata.Field("hour", com.mini.paimon.metadata.DataType.STRING, false));
+            fields2.add(new com.mini.paimon.metadata.Field("user_id", com.mini.paimon.metadata.DataType.INT(), false));
+            fields2.add(new com.mini.paimon.metadata.Field("action", com.mini.paimon.metadata.DataType.STRING(), true));
+            fields2.add(new com.mini.paimon.metadata.Field("dt", com.mini.paimon.metadata.DataType.STRING(), false));
+            fields2.add(new com.mini.paimon.metadata.Field("hour", com.mini.paimon.metadata.DataType.STRING(), false));
 
             List<String> primaryKeys2 = Arrays.asList("user_id");
             List<String> partitionKeys2 = Arrays.asList("dt", "hour");

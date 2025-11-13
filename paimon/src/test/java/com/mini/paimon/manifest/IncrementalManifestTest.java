@@ -83,9 +83,9 @@ public class IncrementalManifestTest {
         logger.info("=== Test: Incremental Manifest Write ===");
         
         List<Field> fields = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("name", DataType.STRING, true),
-            new Field("age", DataType.INT, true)
+            new Field("id", DataType.INT(), false),
+            new Field("name", DataType.STRING(), true),
+            new Field("age", DataType.INT(), true)
         );
         Schema schema = new Schema(0, fields, Arrays.asList("id"), Arrays.asList());
         
@@ -139,8 +139,8 @@ public class IncrementalManifestTest {
         logger.info("=== Test: Manifest Compaction ===");
         
         List<Field> fields2 = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("value", DataType.STRING, true)
+            new Field("id", DataType.INT(), false),
+            new Field("value", DataType.STRING(), true)
         );
         Schema schema = new Schema(0, fields2, Arrays.asList("id"), Arrays.asList());
         
@@ -193,8 +193,8 @@ public class IncrementalManifestTest {
         logger.info("=== Test: Incremental Read ===");
         
         List<Field> fields3 = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("data", DataType.STRING, true)
+            new Field("id", DataType.INT(), false),
+            new Field("data", DataType.STRING(), true)
         );
         Schema schema = new Schema(0, fields3, Arrays.asList("id"), Arrays.asList());
         
@@ -246,8 +246,8 @@ public class IncrementalManifestTest {
         logger.info("=== Test: Base and Delta Separation ===");
         
         List<Field> fields4 = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("value", DataType.INT, true)
+            new Field("id", DataType.INT(), false),
+            new Field("value", DataType.INT(), true)
         );
         Schema schema = new Schema(0, fields4, Arrays.asList("id"), Arrays.asList());
         
@@ -298,8 +298,8 @@ public class IncrementalManifestTest {
         logger.info("=== Test: Performance Improvement ===");
         
         List<Field> fields5 = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("data", DataType.STRING, true)
+            new Field("id", DataType.INT(), false),
+            new Field("data", DataType.STRING(), true)
         );
         Schema schema = new Schema(0, fields5, Arrays.asList("id"), Arrays.asList());
         

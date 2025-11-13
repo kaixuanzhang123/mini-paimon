@@ -100,35 +100,9 @@ public class Row {
 
     /**
      * 检查值的类型是否与DataType兼容
-     * 注意：支持数值类型的自动转换兼容性（Integer -> Long, Float -> Double）
      */
     private boolean isTypeCompatible(Object value, DataType type) {
-        switch (type) {
-            case INT:
-                // INT 类型接受 Integer，也接受可以安全转换为 int 的 Number
-                return value instanceof Integer || 
-                       (value instanceof Number && isInIntRange((Number) value));
-            case LONG:
-                // LONG 类型接受 Long、Integer（JSON 反序列化时常见）以及其他数值类型
-                return value instanceof Long || value instanceof Integer || value instanceof Number;
-            case STRING:
-                return value instanceof String;
-            case BOOLEAN:
-                return value instanceof Boolean;
-            case DOUBLE:
-                // DOUBLE 类型接受 Double、Float 以及其他数值类型
-                return value instanceof Double || value instanceof Float || value instanceof Number;
-            default:
-                return false;
-        }
-    }
-    
-    /**
-     * 检查 Number 是否在 int 范围内
-     */
-    private boolean isInIntRange(Number number) {
-        long longValue = number.longValue();
-        return longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE;
+        return type.isCompatible(value);
     }
 
     @Override

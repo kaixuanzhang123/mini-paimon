@@ -25,9 +25,9 @@ public class LSMTreeExample {
         try {
             // 1. 创建表结构
             logger.info("\n1. Creating table schema...");
-            Field idField = new Field("id", DataType.INT, false);
-            Field nameField = new Field("name", DataType.STRING, true);
-            Field ageField = new Field("age", DataType.INT, true);
+            Field idField = new Field("id", DataType.INT(), false);
+            Field nameField = new Field("name", DataType.STRING(), true);
+            Field ageField = new Field("age", DataType.INT(), true);
 
             Schema schema = new Schema(
                 0,

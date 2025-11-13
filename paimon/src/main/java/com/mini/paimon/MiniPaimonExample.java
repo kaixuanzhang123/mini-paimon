@@ -31,8 +31,8 @@ public class MiniPaimonExample {
         String warehousePath = Paths.get("./warehouse").toAbsolutePath().toString();
         PathFactory pathFactory = new PathFactory(warehousePath);
         
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), Collections.singletonList("id"));
         
         System.out.println("创建表结构: " + schema);

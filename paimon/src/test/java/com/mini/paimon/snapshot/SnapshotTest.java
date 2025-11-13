@@ -52,7 +52,7 @@ class SnapshotTest {
     @Test
     void testCreateSnapshot() throws IOException {
         // 创建 Schema
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
         // 创建 DataFileMeta
@@ -96,7 +96,7 @@ class SnapshotTest {
     @Test
     void testLoadSnapshot() throws IOException {
         // 创建 Schema
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
         // 创建 DataFileMeta
@@ -134,7 +134,7 @@ class SnapshotTest {
     @Test
     void testGetLatestSnapshot() throws IOException {
         // 创建 Schema
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
         // 创建 DataFileMeta
@@ -190,7 +190,7 @@ class SnapshotTest {
         assertEquals(0, snapshotManager.getSnapshotCount());
         
         // 创建 Schema
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), Collections.singletonList("id"));
         
         // 创建 DataFileMeta

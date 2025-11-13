@@ -82,10 +82,10 @@ public class PartitionWriteReadExample {
         
         Identifier tableId = new Identifier("default", "user_events");
         List<Field> fields = new ArrayList<>();
-        fields.add(new Field("user_id", DataType.INT, false));
-        fields.add(new Field("event_type", DataType.STRING, true));
-        fields.add(new Field("event_time", DataType.LONG, true));
-        fields.add(new Field("dt", DataType.STRING, false));
+        fields.add(new Field("user_id", DataType.INT(), false));
+        fields.add(new Field("event_type", DataType.STRING(), true));
+        fields.add(new Field("event_time", DataType.LONG(), true));
+        fields.add(new Field("dt", DataType.STRING(), false));
         
         List<String> primaryKeys = Arrays.asList("user_id");
         List<String> partitionKeys = Arrays.asList("dt");
@@ -155,10 +155,10 @@ public class PartitionWriteReadExample {
         
         Identifier tableId = new Identifier("default", "user_behavior");
         List<Field> fields = new ArrayList<>();
-        fields.add(new Field("user_id", DataType.INT, false));
-        fields.add(new Field("action", DataType.STRING, true));
-        fields.add(new Field("dt", DataType.STRING, false));
-        fields.add(new Field("hour", DataType.STRING, false));
+        fields.add(new Field("user_id", DataType.INT(), false));
+        fields.add(new Field("action", DataType.STRING(), true));
+        fields.add(new Field("dt", DataType.STRING(), false));
+        fields.add(new Field("hour", DataType.STRING(), false));
         
         List<String> primaryKeys = Arrays.asList("user_id");
         List<String> partitionKeys = Arrays.asList("dt", "hour");

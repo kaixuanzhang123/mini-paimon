@@ -35,9 +35,9 @@ public class MergeSortTest {
         
         // 创建测试 Schema（有主键）
         List<Field> fields = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("name", DataType.STRING, false),
-            new Field("age", DataType.INT, false)
+            new Field("id", DataType.INT(), false),
+            new Field("name", DataType.STRING(), false),
+            new Field("age", DataType.INT(), false)
         );
         schema = new Schema(1, fields, Arrays.asList("id"), Collections.emptyList());
         

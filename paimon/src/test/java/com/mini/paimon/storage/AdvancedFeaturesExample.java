@@ -41,8 +41,8 @@ public class AdvancedFeaturesExample {
         Schema noPkSchema = new Schema(
             1,
             Arrays.asList(
-                new Field("name", DataType.STRING, true),
-                new Field("value", DataType.INT, true)
+                new Field("name", DataType.STRING(), true),
+                new Field("value", DataType.INT(), true)
             ),
             Arrays.asList(), // 空主键列表
             Arrays.asList()
@@ -73,8 +73,8 @@ public class AdvancedFeaturesExample {
         Schema schema = new Schema(
             2,
             Arrays.asList(
-                new Field("id", DataType.INT, false),
-                new Field("name", DataType.STRING, true)
+                new Field("id", DataType.INT(), false),
+                new Field("name", DataType.STRING(), true)
             ),
             Arrays.asList("id"),
             Arrays.asList()
@@ -107,8 +107,8 @@ public class AdvancedFeaturesExample {
         Schema schema = new Schema(
             3,
             Arrays.asList(
-                new Field("id", DataType.INT, false),
-                new Field("data", DataType.STRING, true)
+                new Field("id", DataType.INT(), false),
+                new Field("data", DataType.STRING(), true)
             ),
             Arrays.asList("id"),
             Arrays.asList()

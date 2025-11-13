@@ -44,16 +44,16 @@ public class FlinkSchemaConverter {
     public static DataType toDataType(LogicalType logicalType) {
         switch (logicalType.getTypeRoot()) {
             case INTEGER:
-                return DataType.INT;
+                return DataType.INT();
             case BIGINT:
-                return DataType.LONG;
+                return DataType.LONG();
             case VARCHAR:
             case CHAR:
-                return DataType.STRING;
+                return DataType.STRING();
             case BOOLEAN:
-                return DataType.BOOLEAN;
+                return DataType.BOOLEAN();
             case DOUBLE:
-                return DataType.DOUBLE;
+                return DataType.DOUBLE();
             default:
                 throw new UnsupportedOperationException(
                     "Unsupported Flink type: " + logicalType.getTypeRoot());
@@ -68,20 +68,20 @@ public class FlinkSchemaConverter {
     }
     
     public static org.apache.flink.table.types.DataType toFlinkType(DataType dataType) {
-        switch (dataType) {
-            case INT:
-                return org.apache.flink.table.api.DataTypes.INT();
-            case LONG:
-                return org.apache.flink.table.api.DataTypes.BIGINT();
-            case STRING:
-                return org.apache.flink.table.api.DataTypes.STRING();
-            case BOOLEAN:
-                return org.apache.flink.table.api.DataTypes.BOOLEAN();
-            case DOUBLE:
-                return org.apache.flink.table.api.DataTypes.DOUBLE();
-            default:
-                throw new UnsupportedOperationException(
-                    "Unsupported Paimon type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("INT".equals(typeName)) {
+            return org.apache.flink.table.api.DataTypes.INT();
+        } else if ("LONG".equals(typeName)) {
+            return org.apache.flink.table.api.DataTypes.BIGINT();
+        } else if ("STRING".equals(typeName)) {
+            return org.apache.flink.table.api.DataTypes.STRING();
+        } else if ("BOOLEAN".equals(typeName)) {
+            return org.apache.flink.table.api.DataTypes.BOOLEAN();
+        } else if ("DOUBLE".equals(typeName)) {
+            return org.apache.flink.table.api.DataTypes.DOUBLE();
+        } else {
+            throw new UnsupportedOperationException(
+                "Unsupported Paimon type: " + dataType);
         }
     }
 }

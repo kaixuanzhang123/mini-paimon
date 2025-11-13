@@ -23,8 +23,8 @@ class RowTest {
 
     @Test
     void testValidate() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), 
                 Collections.singletonList("id"));
         

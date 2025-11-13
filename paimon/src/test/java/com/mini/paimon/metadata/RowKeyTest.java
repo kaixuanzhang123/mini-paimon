@@ -14,8 +14,8 @@ class RowKeyTest {
 
     @Test
     void testFromRow() {
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         Schema schema = new Schema(0, Arrays.asList(idField, nameField), 
                 Collections.singletonList("id"));
         
@@ -28,7 +28,7 @@ class RowKeyTest {
 
     @Test
     void testCompareTo() {
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), 
                 Collections.singletonList("id"));
         
@@ -47,7 +47,7 @@ class RowKeyTest {
 
     @Test
     void testEquals() {
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), 
                 Collections.singletonList("id"));
         
@@ -63,7 +63,7 @@ class RowKeyTest {
 
     @Test
     void testNullPrimaryKey() {
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         Schema schema = new Schema(0, Collections.singletonList(idField), 
                 Collections.singletonList("id"));
         

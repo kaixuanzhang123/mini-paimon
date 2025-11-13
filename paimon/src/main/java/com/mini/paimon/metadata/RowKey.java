@@ -66,21 +66,19 @@ public class RowKey implements Comparable<RowKey> {
         for (int index : pkIndices) {
             Object value = row.getValue(index);
             Field field = schema.getFields().get(index);
+            DataType type = field.getType();
             
-            switch (field.getType()) {
-                case INT:
-                    size += 4;
-                    break;
-                case LONG:
-                    size += 8;
-                    break;
-                case BOOLEAN:
-                    size += 1;
-                    break;
-                case STRING:
-                    String str = value != null ? value.toString() : "";
-                    size += 4 + str.getBytes(StandardCharsets.UTF_8).length;
-                    break;
+            if (type instanceof DataType.IntType) {
+                size += 4;
+            } else if (type instanceof DataType.LongType) {
+                size += 8;
+            } else if (type instanceof DataType.BooleanType) {
+                size += 1;
+            } else if (type instanceof DataType.StringType) {
+                String str = value != null ? value.toString() : "";
+                size += 4 + str.getBytes(StandardCharsets.UTF_8).length;
+            } else {
+                throw new IllegalArgumentException("Unsupported primary key type: " + type);
             }
         }
         return size;
@@ -90,34 +88,31 @@ public class RowKey implements Comparable<RowKey> {
      * 序列化单个值到ByteBuffer
      */
     private static void serializeValue(ByteBuffer buffer, Object value, DataType type) {
-        switch (type) {
-            case INT:
-                if (value instanceof Integer) {
-                    buffer.putInt((Integer) value);
-                } else if (value instanceof Long) {
-                    buffer.putInt(((Long) value).intValue());
-                } else {
-                    buffer.putInt(((Number) value).intValue());
-                }
-                break;
-            case LONG:
-                if (value instanceof Long) {
-                    buffer.putLong((Long) value);
-                } else if (value instanceof Integer) {
-                    buffer.putLong(((Integer) value).longValue());
-                } else {
-                    buffer.putLong(((Number) value).longValue());
-                }
-                break;
-            case BOOLEAN:
-                buffer.put((byte) (((Boolean) value) ? 1 : 0));
-                break;
-            case STRING:
-                String str = (String) value;
-                byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
-                buffer.putInt(bytes.length);
-                buffer.put(bytes);
-                break;
+        if (type instanceof DataType.IntType) {
+            if (value instanceof Integer) {
+                buffer.putInt((Integer) value);
+            } else if (value instanceof Long) {
+                buffer.putInt(((Long) value).intValue());
+            } else {
+                buffer.putInt(((Number) value).intValue());
+            }
+        } else if (type instanceof DataType.LongType) {
+            if (value instanceof Long) {
+                buffer.putLong((Long) value);
+            } else if (value instanceof Integer) {
+                buffer.putLong(((Integer) value).longValue());
+            } else {
+                buffer.putLong(((Number) value).longValue());
+            }
+        } else if (type instanceof DataType.BooleanType) {
+            buffer.put((byte) (((Boolean) value) ? 1 : 0));
+        } else if (type instanceof DataType.StringType) {
+            String str = (String) value;
+            byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
+            buffer.putInt(bytes.length);
+            buffer.put(bytes);
+        } else {
+            throw new IllegalArgumentException("Unsupported primary key type: " + type);
         }
     }
 

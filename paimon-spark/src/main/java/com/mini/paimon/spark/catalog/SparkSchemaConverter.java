@@ -48,15 +48,15 @@ public class SparkSchemaConverter {
 
     public static DataType toDataType(org.apache.spark.sql.types.DataType sparkType) {
         if (sparkType instanceof IntegerType) {
-            return DataType.INT;
+            return DataType.INT();
         } else if (sparkType instanceof LongType) {
-            return DataType.LONG;
+            return DataType.LONG();
         } else if (sparkType instanceof StringType) {
-            return DataType.STRING;
+            return DataType.STRING();
         } else if (sparkType instanceof BooleanType) {
-            return DataType.BOOLEAN;
+            return DataType.BOOLEAN();
         } else if (sparkType instanceof DoubleType) {
-            return DataType.DOUBLE;
+            return DataType.DOUBLE();
         } else {
             throw new UnsupportedOperationException("Unsupported Spark type: " + sparkType);
         }
@@ -80,19 +80,19 @@ public class SparkSchemaConverter {
     }
 
     public static org.apache.spark.sql.types.DataType toSparkType(DataType dataType) {
-        switch (dataType) {
-            case INT:
-                return DataTypes.IntegerType;
-            case LONG:
-                return DataTypes.LongType;
-            case STRING:
-                return DataTypes.StringType;
-            case BOOLEAN:
-                return DataTypes.BooleanType;
-            case DOUBLE:
-                return DataTypes.DoubleType;
-            default:
-                throw new UnsupportedOperationException("Unsupported Paimon type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("INT".equals(typeName)) {
+            return DataTypes.IntegerType;
+        } else if ("LONG".equals(typeName)) {
+            return DataTypes.LongType;
+        } else if ("STRING".equals(typeName)) {
+            return DataTypes.StringType;
+        } else if ("BOOLEAN".equals(typeName)) {
+            return DataTypes.BooleanType;
+        } else if ("DOUBLE".equals(typeName)) {
+            return DataTypes.DoubleType;
+        } else {
+            throw new UnsupportedOperationException("Unsupported Paimon type: " + dataType);
         }
     }
 }

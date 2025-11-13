@@ -41,7 +41,7 @@ class TableManagerTest {
     @Test
     void testCreateTableAlreadyExists() throws IOException {
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 先创建表
         tableManager.createTable(
@@ -67,7 +67,7 @@ class TableManagerTest {
     @Test
     void testGetTableMetadata() throws IOException {
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 先创建表
         TableMetadata originalMetadata = tableManager.createTable(
@@ -92,7 +92,7 @@ class TableManagerTest {
         assertFalse(tableManager.tableExists("test_db", "test_table"));
         
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 创建表
         tableManager.createTable(
@@ -109,7 +109,7 @@ class TableManagerTest {
     @Test
     void testDropTable() throws IOException {
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 创建表
         tableManager.createTable(
@@ -137,7 +137,7 @@ class TableManagerTest {
     @Test
     void testListTables() throws IOException {
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         
         // 创建多个表
         tableManager.createTable(

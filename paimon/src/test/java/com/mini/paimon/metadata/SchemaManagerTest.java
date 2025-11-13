@@ -44,8 +44,8 @@ class SchemaManagerTest {
     @Test
     void testCreateNewSchemaVersion() throws IOException {
         // 创建字段
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         // 创建新的 Schema 版本
         Schema schema = schemaManager.createNewSchemaVersion(
@@ -68,8 +68,8 @@ class SchemaManagerTest {
     @Test
     void testLoadSchema() throws IOException {
         // 先创建一个 Schema
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         Schema originalSchema = schemaManager.createNewSchemaVersion(
             Arrays.asList(idField, nameField),
@@ -89,8 +89,8 @@ class SchemaManagerTest {
     @Test
     void testGetCurrentSchema() throws IOException {
         // 先创建一个 Schema
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         Schema schema = schemaManager.createNewSchemaVersion(
             Arrays.asList(idField, nameField),
@@ -108,9 +108,9 @@ class SchemaManagerTest {
     @Test
     void testLoadLatestSchema() throws IOException {
         // 创建多个 Schema 版本
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
-        Field ageField = new Field("age", DataType.INT, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
+        Field ageField = new Field("age", DataType.INT(), true);
         
         Schema schema1 = schemaManager.createNewSchemaVersion(
             Arrays.asList(idField, nameField),
@@ -138,7 +138,7 @@ class SchemaManagerTest {
         assertFalse(schemaManager.hasSchema());
         
         // 创建一个 Schema
-        Field idField = new Field("id", DataType.INT, false);
+        Field idField = new Field("id", DataType.INT(), false);
         schemaManager.createNewSchemaVersion(
             Collections.singletonList(idField),
             Collections.singletonList("id"),
@@ -153,8 +153,8 @@ class SchemaManagerTest {
         assertEquals(0, schemaManager.getSchemaVersionCount());
         
         // 创建多个 Schema 版本
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         
         schemaManager.createNewSchemaVersion(
             Collections.singletonList(idField),

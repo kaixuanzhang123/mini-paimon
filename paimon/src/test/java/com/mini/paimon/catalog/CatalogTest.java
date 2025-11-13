@@ -188,9 +188,9 @@ public class CatalogTest {
         
         // 添加新字段
         List<Field> newFields = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("name", DataType.STRING, false),
-            new Field("age", DataType.INT, true)  // 新增字段
+            new Field("id", DataType.INT(), false),
+            new Field("name", DataType.STRING(), false),
+            new Field("age", DataType.INT(), true)  // 新增字段
         );
         
         Schema newSchema = catalog.alterTable(
@@ -306,8 +306,8 @@ public class CatalogTest {
     
     private Schema createTestSchema() {
         List<Field> fields = Arrays.asList(
-            new Field("id", DataType.INT, false),
-            new Field("name", DataType.STRING, false)
+            new Field("id", DataType.INT(), false),
+            new Field("name", DataType.STRING(), false)
         );
         
         return new Schema(

@@ -32,8 +32,8 @@ class LSMTreeTest {
     @BeforeEach
     void setUp() throws IOException {
         // 创建测试用的 Schema
-        Field idField = new Field("id", DataType.INT, false);
-        Field nameField = new Field("name", DataType.STRING, true);
+        Field idField = new Field("id", DataType.INT(), false);
+        Field nameField = new Field("name", DataType.STRING(), true);
         schema = new Schema(0, Arrays.asList(idField, nameField), Collections.singletonList("id"));
         
         // 创建临时测试目录

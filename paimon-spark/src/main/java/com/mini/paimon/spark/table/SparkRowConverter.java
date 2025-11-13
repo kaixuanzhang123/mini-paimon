@@ -40,16 +40,14 @@ public class SparkRowConverter {
             return null;
         }
         
-        switch (dataType) {
-            case STRING:
-                return UTF8String.fromString((String) value);
-            case INT:
-            case LONG:
-            case BOOLEAN:
-            case DOUBLE:
-                return value;
-            default:
-                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("STRING".equals(typeName)) {
+            return UTF8String.fromString((String) value);
+        } else if ("INT".equals(typeName) || "LONG".equals(typeName) || 
+                   "BOOLEAN".equals(typeName) || "DOUBLE".equals(typeName)) {
+            return value;
+        } else {
+            throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
 
@@ -58,19 +56,19 @@ public class SparkRowConverter {
             return null;
         }
         
-        switch (dataType) {
-            case INT:
-                return row.getInt(ordinal);
-            case LONG:
-                return row.getLong(ordinal);
-            case STRING:
-                return row.getUTF8String(ordinal);
-            case BOOLEAN:
-                return row.getBoolean(ordinal);
-            case DOUBLE:
-                return row.getDouble(ordinal);
-            default:
-                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("INT".equals(typeName)) {
+            return row.getInt(ordinal);
+        } else if ("LONG".equals(typeName)) {
+            return row.getLong(ordinal);
+        } else if ("STRING".equals(typeName)) {
+            return row.getUTF8String(ordinal);
+        } else if ("BOOLEAN".equals(typeName)) {
+            return row.getBoolean(ordinal);
+        } else if ("DOUBLE".equals(typeName)) {
+            return row.getDouble(ordinal);
+        } else {
+            throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
 
@@ -79,19 +77,17 @@ public class SparkRowConverter {
             return null;
         }
         
-        switch (dataType) {
-            case STRING:
-                if (sparkValue instanceof UTF8String) {
-                    return ((UTF8String) sparkValue).toString();
-                }
-                return sparkValue.toString();
-            case INT:
-            case LONG:
-            case BOOLEAN:
-            case DOUBLE:
-                return sparkValue;
-            default:
-                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("STRING".equals(typeName)) {
+            if (sparkValue instanceof UTF8String) {
+                return ((UTF8String) sparkValue).toString();
+            }
+            return sparkValue.toString();
+        } else if ("INT".equals(typeName) || "LONG".equals(typeName) || 
+                   "BOOLEAN".equals(typeName) || "DOUBLE".equals(typeName)) {
+            return sparkValue;
+        } else {
+            throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
 }

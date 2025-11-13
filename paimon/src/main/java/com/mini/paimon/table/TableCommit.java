@@ -10,6 +10,8 @@ import com.mini.paimon.manifest.ManifestList;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
+import com.mini.paimon.transaction.Transaction;
+import com.mini.paimon.transaction.TransactionManager;
 import com.mini.paimon.utils.IdGenerator;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
@@ -53,6 +55,9 @@ public class TableCommit {
     // 注意：每个 TableCommit 实例独立维护，不跨实例共享
     private volatile long lastCommittedIdentifier = 0L;
     
+    // 事务管理器（可选）
+    private TransactionManager transactionManager;
+    
     public TableCommit(Catalog catalog, PathFactory pathFactory, Identifier identifier) {
         this.catalog = catalog;
         this.pathFactory = pathFactory;
@@ -60,6 +65,21 @@ public class TableCommit {
         this.snapshotManager = new SnapshotManager(
             pathFactory, identifier.getDatabase(), identifier.getTable());
         this.idGenerator = new IdGenerator();
+        this.transactionManager = null;
+    }
+    
+    /**
+     * 构造函数（支持事务管理器）
+     */
+    public TableCommit(Catalog catalog, PathFactory pathFactory, Identifier identifier, 
+                      TransactionManager transactionManager) {
+        this.catalog = catalog;
+        this.pathFactory = pathFactory;
+        this.identifier = identifier;
+        this.snapshotManager = new SnapshotManager(
+            pathFactory, identifier.getDatabase(), identifier.getTable());
+        this.idGenerator = new IdGenerator();
+        this.transactionManager = transactionManager;
     }
     
     /**
@@ -76,7 +96,14 @@ public class TableCommit {
      * @throws IOException 提交失败
      */
     public void commit(TableWrite.TableCommitMessage commitMessage) throws IOException {
-        commit(commitMessage, Snapshot.CommitKind.APPEND);
+        commit(commitMessage, Snapshot.CommitKind.APPEND, null);
+    }
+    
+    /**
+     * 提交写入操作（支持事务）
+     */
+    public void commit(TableWrite.TableCommitMessage commitMessage, String transactionId) throws IOException {
+        commit(commitMessage, Snapshot.CommitKind.APPEND, transactionId);
     }
     
     /**
@@ -88,6 +115,20 @@ public class TableCommit {
      */
     public void commit(TableWrite.TableCommitMessage commitMessage, Snapshot.CommitKind commitKind) 
             throws IOException {
+        commit(commitMessage, commitKind, null);
+    }
+    
+    /**
+     * 提交写入操作（完整版本，支持事务）
+     * 
+     * @param commitMessage 提交消息
+     * @param commitKind 提交类型
+     * @param transactionId 事务ID（可选）
+     * @throws IOException 提交失败
+     */
+    public void commit(TableWrite.TableCommitMessage commitMessage, 
+                      Snapshot.CommitKind commitKind,
+                      String transactionId) throws IOException {
         
         // 获取提交锁，保证原子性
         commitLock.lock();
@@ -194,6 +235,11 @@ public class TableCommit {
                 // 8. 更新成功提交的 commitIdentifier
                 lastCommittedIdentifier = commitMessage.getCommitIdentifier();
                 
+                // 9. 如果有事务管理器，提交事务
+                if (transactionManager != null && transactionId != null) {
+                    transactionManager.commitTransaction(transactionId, snapshot.getId());
+                }
+                
                 long duration = System.currentTimeMillis() - startTime;
                 logger.info("Successfully committed snapshot {} to table {}, took {}ms, files={}",
                     snapshot.getId(), identifier, duration, manifestEntries.size());
@@ -202,7 +248,31 @@ public class TableCommit {
                 // 提交失败，记录错误并抛出异常
                 logger.error("Failed to commit snapshot {} to table {}",
                     snapshot.getId(), identifier, e);
+                
+                // 如果有事务管理器，回滚事务
+                if (transactionManager != null && transactionId != null) {
+                    try {
+                        transactionManager.abortTransaction(transactionId);
+                    } catch (Exception abortEx) {
+                        logger.error("Failed to abort transaction " + transactionId, abortEx);
+                    }
+                }
+                
                 throw new IOException("Failed to commit snapshot", e);
+            } catch (Exception e) {
+                // 其他异常
+                logger.error("Unexpected error during commit for table {}", identifier, e);
+                
+                // 如果有事务管理器，回滚事务
+                if (transactionManager != null && transactionId != null) {
+                    try {
+                        transactionManager.abortTransaction(transactionId);
+                    } catch (Exception abortEx) {
+                        logger.error("Failed to abort transaction " + transactionId, abortEx);
+                    }
+                }
+                
+                throw new IOException("Commit failed", e);
             }
             
         } finally {

@@ -46,19 +46,19 @@ public class FlinkRowConverter {
             return null;
         }
         
-        switch (dataType) {
-            case INT:
-                return rowData.getInt(pos);
-            case LONG:
-                return rowData.getLong(pos);
-            case STRING:
-                return rowData.getString(pos).toString();
-            case BOOLEAN:
-                return rowData.getBoolean(pos);
-            case DOUBLE:
-                return rowData.getDouble(pos);
-            default:
-                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+        String typeName = dataType.typeName();
+        if ("INT".equals(typeName)) {
+            return rowData.getInt(pos);
+        } else if ("LONG".equals(typeName)) {
+            return rowData.getLong(pos);
+        } else if ("STRING".equals(typeName)) {
+            return rowData.getString(pos).toString();
+        } else if ("BOOLEAN".equals(typeName)) {
+            return rowData.getBoolean(pos);
+        } else if ("DOUBLE".equals(typeName)) {
+            return rowData.getDouble(pos);
+        } else {
+            throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
     
@@ -67,38 +67,38 @@ public class FlinkRowConverter {
             return null;
         }
         
-        switch (dataType) {
-            case INT:
-                if (value instanceof Integer) {
-                    return value;
-                } else if (value instanceof Long) {
-                    return ((Long) value).intValue();
-                } else if (value instanceof Number) {
-                    return ((Number) value).intValue();
-                }
+        String typeName = dataType.typeName();
+        if ("INT".equals(typeName)) {
+            if (value instanceof Integer) {
                 return value;
-            case LONG:
-                if (value instanceof Long) {
-                    return value;
-                } else if (value instanceof Integer) {
-                    return ((Integer) value).longValue();
-                } else if (value instanceof Number) {
-                    return ((Number) value).longValue();
-                }
+            } else if (value instanceof Long) {
+                return ((Long) value).intValue();
+            } else if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+            return value;
+        } else if ("LONG".equals(typeName)) {
+            if (value instanceof Long) {
                 return value;
-            case DOUBLE:
-                if (value instanceof Double) {
-                    return value;
-                } else if (value instanceof Number) {
-                    return ((Number) value).doubleValue();
-                }
+            } else if (value instanceof Integer) {
+                return ((Integer) value).longValue();
+            } else if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+            return value;
+        } else if ("DOUBLE".equals(typeName)) {
+            if (value instanceof Double) {
                 return value;
-            case STRING:
-                return StringData.fromString(value.toString());
-            case BOOLEAN:
-                return value;
-            default:
-                return value;
+            } else if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+            return value;
+        } else if ("STRING".equals(typeName)) {
+            return StringData.fromString(value.toString());
+        } else if ("BOOLEAN".equals(typeName)) {
+            return value;
+        } else {
+            return value;
         }
     }
 }

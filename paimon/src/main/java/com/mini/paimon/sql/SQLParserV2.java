@@ -364,22 +364,32 @@ public class SQLParserV2 {
             switch (typeName) {
                 case "INT":
                 case "INTEGER":
-                    return DataType.INT;
+                    return DataType.INT();
                 case "BIGINT":
                 case "LONG":
-                    return DataType.LONG;
+                    return DataType.LONG();
                 case "DOUBLE":
                 case "FLOAT":
-                    return DataType.DOUBLE;
+                    return DataType.DOUBLE();
                 case "STRING":
                 case "VARCHAR":
                 case "CHAR":
                 case "TEXT":
-                    return DataType.STRING;
+                    return DataType.STRING();
                 case "BOOLEAN":
                 case "BOOL":
-                    return DataType.BOOLEAN;
+                    return DataType.BOOLEAN();
+                case "TIMESTAMP":
+                case "DATETIME":
+                    return DataType.TIMESTAMP();
                 default:
+                    if (typeName.startsWith("DECIMAL")) {
+                        return DataType.DECIMAL(38, 18);
+                    } else if (typeName.startsWith("ARRAY")) {
+                        return DataType.ARRAY(DataType.STRING());
+                    } else if (typeName.startsWith("MAP")) {
+                        return DataType.MAP(DataType.STRING(), DataType.STRING());
+                    }
                     throw new IllegalArgumentException("Unsupported data type: " + typeName);
             }
         }
@@ -497,19 +507,20 @@ public class SQLParserV2 {
                 text = text.substring(1, text.length() - 1);
             }
             
-            switch (dataType) {
-                case INT:
-                    return Integer.parseInt(text);
-                case LONG:
-                    return Long.parseLong(text);
-                case DOUBLE:
-                    return Double.parseDouble(text);
-                case STRING:
-                    return text;
-                case BOOLEAN:
-                    return Boolean.parseBoolean(text);
-                default:
-                    throw new IllegalArgumentException("Unsupported data type: " + dataType);
+            if (dataType instanceof DataType.IntType) {
+                return Integer.parseInt(text);
+            } else if (dataType instanceof DataType.LongType) {
+                return Long.parseLong(text);
+            } else if (dataType instanceof DataType.DoubleType) {
+                return Double.parseDouble(text);
+            } else if (dataType instanceof DataType.StringType) {
+                return text;
+            } else if (dataType instanceof DataType.BooleanType) {
+                return Boolean.parseBoolean(text);
+            } else if (dataType instanceof DataType.TimestampType) {
+                return java.time.LocalDateTime.parse(text);
+            } else {
+                throw new IllegalArgumentException("Unsupported data type: " + dataType);
             }
         }
         
