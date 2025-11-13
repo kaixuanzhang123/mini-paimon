@@ -34,10 +34,17 @@ public class FlinkSQLExample {
         
         LOG.info("=== Inserting Data ===");
         tableEnv.executeSql(
+                "INSERT INTO users VALUES " +
+                        "(1, 'Alice', 25, 'alice@example.com'), " +
+                        "(2, 'Bob', 30, 'bob@example.com'), " +
+                        "(3, 'Charlie', 35, 'charlie@example.com')"
+        ).await();
+
+        tableEnv.executeSql(
             "INSERT INTO users VALUES " +
-            "(1, 'Alice', 25, 'alice@example.com'), " +
-            "(2, 'Bob', 30, 'bob@example.com'), " +
-            "(3, 'Charlie', 35, 'charlie@example.com')"
+            "(4, 'Alice', 25, 'alice@example.com'), " +
+            "(5, 'Bob', 30, 'bob@example.com'), " +
+            "(6, 'Charlie', 35, 'charlie@example.com')"
         ).await();
         
         LOG.info("=== Querying Data ===");

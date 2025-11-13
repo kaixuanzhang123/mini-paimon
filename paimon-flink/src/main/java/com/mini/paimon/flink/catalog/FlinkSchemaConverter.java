@@ -71,7 +71,7 @@ public class FlinkSchemaConverter {
         String typeName = dataType.typeName();
         if ("INT".equals(typeName)) {
             return org.apache.flink.table.api.DataTypes.INT();
-        } else if ("LONG".equals(typeName)) {
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
             return org.apache.flink.table.api.DataTypes.BIGINT();
         } else if ("STRING".equals(typeName)) {
             return org.apache.flink.table.api.DataTypes.STRING();
@@ -81,7 +81,7 @@ public class FlinkSchemaConverter {
             return org.apache.flink.table.api.DataTypes.DOUBLE();
         } else {
             throw new UnsupportedOperationException(
-                "Unsupported Paimon type: " + dataType);
+                "Unsupported Paimon type: " + typeName);
         }
     }
 }

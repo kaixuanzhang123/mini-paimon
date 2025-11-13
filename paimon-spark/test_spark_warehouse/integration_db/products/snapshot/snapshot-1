@@ -1,0 +1,16 @@
+{
+  "version" : 3,
+  "id" : 1,
+  "schemaId" : 0,
+  "baseManifestList" : "manifest-list-delta-1",
+  "deltaManifestList" : "manifest-list-delta-1",
+  "commitUser" : "f7727e21-905c-4be7-95d1-7fe00da5ed3e",
+  "commitIdentifier" : 1,
+  "commitKind" : "APPEND",
+  "timeMillis" : 1763057602160,
+  "totalRecordCount" : 3,
+  "deltaRecordCount" : 3,
+  "snapshotId" : 1,
+  "manifestList" : "manifest-list-delta-1",
+  "commitTime" : "2025-11-13T18:13:22.160Z"
+}

@@ -49,7 +49,7 @@ public class FlinkRowConverter {
         String typeName = dataType.typeName();
         if ("INT".equals(typeName)) {
             return rowData.getInt(pos);
-        } else if ("LONG".equals(typeName)) {
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
             return rowData.getLong(pos);
         } else if ("STRING".equals(typeName)) {
             return rowData.getString(pos).toString();
@@ -58,7 +58,7 @@ public class FlinkRowConverter {
         } else if ("DOUBLE".equals(typeName)) {
             return rowData.getDouble(pos);
         } else {
-            throw new UnsupportedOperationException("Unsupported type: " + dataType);
+            throw new UnsupportedOperationException("Unsupported type: " + typeName);
         }
     }
     
@@ -77,7 +77,7 @@ public class FlinkRowConverter {
                 return ((Number) value).intValue();
             }
             return value;
-        } else if ("LONG".equals(typeName)) {
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
             if (value instanceof Long) {
                 return value;
             } else if (value instanceof Integer) {

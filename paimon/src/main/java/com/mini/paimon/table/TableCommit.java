@@ -240,6 +240,9 @@ public class TableCommit {
                     transactionManager.commitTransaction(transactionId, snapshot.getId());
                 }
                 
+                // 10. 清理 WAL 文件和目录（提交成功后数据已持久化）
+                cleanupWALDirectory();
+                
                 long duration = System.currentTimeMillis() - startTime;
                 logger.info("Successfully committed snapshot {} to table {}, took {}ms, files={}",
                     snapshot.getId(), identifier, duration, manifestEntries.size());
@@ -298,6 +301,50 @@ public class TableCommit {
         if (commitMessage.getCommitIdentifier() <= 0) {
             throw new IllegalArgumentException(
                 "CommitIdentifier must be positive: " + commitMessage.getCommitIdentifier());
+        }
+    }
+    
+    /**
+     * 清理 WAL 目录及其所有文件
+     * 在提交成功后调用，此时数据已持久化到 SSTable，WAL 不再需要
+     */
+    private void cleanupWALDirectory() {
+        try {
+            String database = identifier.getDatabase();
+            String table = identifier.getTable();
+            Path walDir = pathFactory.getWalDir(database, table);
+            
+            if (!Files.exists(walDir)) {
+                logger.debug("WAL directory does not exist: {}", walDir);
+                return;
+            }
+            
+            // 删除 WAL 目录下的所有文件
+            try (java.util.stream.Stream<Path> stream = Files.list(walDir)) {
+                stream.forEach(walFile -> {
+                    try {
+                        Files.deleteIfExists(walFile);
+                        logger.debug("Deleted WAL file: {}", walFile);
+                    } catch (IOException e) {
+                        logger.warn("Failed to delete WAL file {}: {}", walFile, e.getMessage());
+                    }
+                });
+            }
+            
+            // 删除 WAL 目录本身（如果为空）
+            try {
+                Files.delete(walDir);
+                logger.info("Deleted WAL directory: {}", walDir);
+            } catch (java.nio.file.DirectoryNotEmptyException e) {
+                // 目录不为空，可能有其他并发写入的 WAL，保留目录
+                logger.debug("WAL directory not empty, keeping it: {}", walDir);
+            } catch (IOException e) {
+                logger.warn("Failed to delete WAL directory {}: {}", walDir, e.getMessage());
+            }
+            
+        } catch (IOException e) {
+            // WAL 清理失败不影响提交结果，只记录警告
+            logger.warn("Failed to cleanup WAL directory for table {}: {}", identifier, e.getMessage());
         }
     }
     

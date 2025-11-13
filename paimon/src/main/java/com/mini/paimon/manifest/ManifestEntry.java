@@ -13,7 +13,9 @@ import java.util.Objects;
  * 记录数据文件的变更（添加/删除）
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ManifestEntry {
+public class ManifestEntry implements java.io.Serializable {
+    private static final long serialVersionUID = 1L;
+    
     /** 操作类型 */
     public enum FileKind {
         /** 添加文件 */

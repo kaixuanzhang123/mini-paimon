@@ -43,8 +43,25 @@ public class SparkRowConverter {
         String typeName = dataType.typeName();
         if ("STRING".equals(typeName)) {
             return UTF8String.fromString((String) value);
-        } else if ("INT".equals(typeName) || "LONG".equals(typeName) || 
-                   "BOOLEAN".equals(typeName) || "DOUBLE".equals(typeName)) {
+        } else if ("INT".equals(typeName)) {
+            // 确保返回 Integer 类型
+            if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+            return value;
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
+            // 确保返回 Long 类型 - 修复 JSON 反序列化时可能返回 Integer 的问题
+            if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+            return value;
+        } else if ("DOUBLE".equals(typeName)) {
+            // 确保返回 Double 类型
+            if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+            return value;
+        } else if ("BOOLEAN".equals(typeName)) {
             return value;
         } else {
             throw new UnsupportedOperationException("Unsupported type: " + dataType);
@@ -59,7 +76,7 @@ public class SparkRowConverter {
         String typeName = dataType.typeName();
         if ("INT".equals(typeName)) {
             return row.getInt(ordinal);
-        } else if ("LONG".equals(typeName)) {
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
             return row.getLong(ordinal);
         } else if ("STRING".equals(typeName)) {
             return row.getUTF8String(ordinal);
@@ -83,7 +100,7 @@ public class SparkRowConverter {
                 return ((UTF8String) sparkValue).toString();
             }
             return sparkValue.toString();
-        } else if ("INT".equals(typeName) || "LONG".equals(typeName) || 
+        } else if ("INT".equals(typeName) || "BIGINT".equals(typeName) || "LONG".equals(typeName) || 
                    "BOOLEAN".equals(typeName) || "DOUBLE".equals(typeName)) {
             return sparkValue;
         } else {

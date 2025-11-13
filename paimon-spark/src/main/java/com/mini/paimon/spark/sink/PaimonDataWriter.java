@@ -51,18 +51,16 @@ public class PaimonDataWriter implements DataWriter<InternalRow> {
     @Override
     public WriterCommitMessage commit() throws IOException {
         try {
+            // 只准备提交，不实际提交。所有 writer 的提交消息会在 BatchWrite.commit() 中统一提交
             TableWrite.TableCommitMessage commitMessage = tableWrite.prepareCommit();
-            
-            TableCommit tableCommit = paimonTable.newCommit();
-            tableCommit.commit(commitMessage);
-            
             tableWrite.close();
             
-            LOG.info("Committed {} records from partition {} task {}", recordCount, partitionId, taskId);
-            return new PaimonWriterCommitMessage(partitionId, recordCount);
+            LOG.info("Prepared {} records from partition {} task {} for commit", recordCount, partitionId, taskId);
+            // 将提交消息包装到 WriterCommitMessage 中，传递给 BatchWrite
+            return new PaimonWriterCommitMessage(partitionId, recordCount, commitMessage);
         } catch (Exception e) {
-            LOG.error("Failed to commit", e);
-            throw new IOException("Failed to commit", e);
+            LOG.error("Failed to prepare commit", e);
+            throw new IOException("Failed to prepare commit", e);
         }
     }
 

@@ -12,10 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
     @JsonSubTypes.Type(value = DataType.IntType.class, name = "INT"),
-    @JsonSubTypes.Type(value = DataType.LongType.class, name = "LONG"),
+    @JsonSubTypes.Type(value = DataType.LongType.class, name = "BIGINT"),
     @JsonSubTypes.Type(value = DataType.StringType.class, name = "STRING"),
     @JsonSubTypes.Type(value = DataType.BooleanType.class, name = "BOOLEAN"),
     @JsonSubTypes.Type(value = DataType.DoubleType.class, name = "DOUBLE"),
@@ -27,14 +27,18 @@ import java.util.Objects;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public abstract class DataType {
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public abstract String typeName();
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public abstract int getFixedSize();
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public boolean isFixedLength() {
         return getFixedSize() > 0;
     }
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
     public abstract boolean isCompatible(Object value);
     
     public static DataType INT() {
@@ -114,7 +118,7 @@ public abstract class DataType {
         
         @Override
         public String typeName() {
-            return "LONG";
+            return "BIGINT";
         }
         
         @Override

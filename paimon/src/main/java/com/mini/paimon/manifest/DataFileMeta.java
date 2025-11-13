@@ -15,7 +15,9 @@ import java.util.Objects;
  * 参考 Paimon 的数据文件元信息设计
  * 包含数据文件的详细元信息，用于文件级别的过滤和跳过
  */
-public class DataFileMeta {
+public class DataFileMeta implements java.io.Serializable {
+    private static final long serialVersionUID = 1L;
+    
     /** 文件名 */
     private final String fileName;
     

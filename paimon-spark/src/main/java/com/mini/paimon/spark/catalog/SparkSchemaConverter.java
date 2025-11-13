@@ -83,7 +83,7 @@ public class SparkSchemaConverter {
         String typeName = dataType.typeName();
         if ("INT".equals(typeName)) {
             return DataTypes.IntegerType;
-        } else if ("LONG".equals(typeName)) {
+        } else if ("BIGINT".equals(typeName) || "LONG".equals(typeName)) {
             return DataTypes.LongType;
         } else if ("STRING".equals(typeName)) {
             return DataTypes.StringType;

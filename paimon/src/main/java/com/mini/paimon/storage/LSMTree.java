@@ -73,8 +73,10 @@ public class LSMTree {
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
-        // 关键修复：使用当前时间戳作为初始 sequence，避免不同 LSMTree 实例产生相同的文件名
-        this.sequenceGenerator = new AtomicLong(System.currentTimeMillis());
+        // 关键修复：使用 writerId + 当前时间戳作为初始 sequence，确保不同 writer 产生唯一的文件名
+        // writerId 左移32位，加上时间戳的低32位，保证全局唯一性
+        long initialSequence = (writerId << 32) | (System.currentTimeMillis() & 0xFFFFFFFFL);
+        this.sequenceGenerator = new AtomicLong(initialSequence);
         this.walSequence = new AtomicLong(0);
         this.sstReader = new SSTableReader();
         this.sstWriter = new SSTableWriter();

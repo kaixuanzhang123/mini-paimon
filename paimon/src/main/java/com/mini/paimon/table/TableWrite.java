@@ -448,7 +448,9 @@ public class TableWrite implements AutoCloseable {
      * - 提交标识符（用于去重）
      * - 新增文件的 Manifest 条目列表
      */
-    public static class TableCommitMessage {
+    public static class TableCommitMessage implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        
         private final String database;
         private final String table;
         private final int schemaId;

@@ -14,7 +14,8 @@ import java.util.Objects;
  * RowKey 类
  * 表示主键的序列化形式，用于排序和比较
  */
-public class RowKey implements Comparable<RowKey> {
+public class RowKey implements Comparable<RowKey>, java.io.Serializable {
+    private static final long serialVersionUID = 1L;
     /** 序列化后的主键字节数组 */
     private byte[] keyBytes;
     
