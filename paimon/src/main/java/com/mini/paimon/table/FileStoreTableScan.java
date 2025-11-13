@@ -124,29 +124,66 @@ public class FileStoreTableScan implements TableScan {
     }
     
     private List<ManifestEntry> readManifestFiles(Snapshot snapshot) throws IOException {
-        // 从 baseManifestList 读取所有 Manifest 文件
-        String manifestListFile = snapshot.getBaseManifestList();
-        if (manifestListFile == null || manifestListFile.isEmpty()) {
-            return Collections.emptyList();
-        }
-        
         // 使用增量读取模式
         if (useIncrementalRead && baseSnapshotId != null) {
             return readIncrementalManifest(snapshot);
         }
         
-        // 使用缓存加载 ManifestList
-        ManifestList manifestList = cacheManager.getManifestList(
+        // 增量模式：合并 base + delta manifest
+        return readBasePlusDeltaManifests(snapshot);
+    }
+    
+    /**
+     * 读取 base + delta manifests 并合并
+     * 这是增量写入模式下的标准读取流程
+     */
+    private List<ManifestEntry> readBasePlusDeltaManifests(Snapshot snapshot) throws IOException {
+        java.util.Map<String, ManifestEntry> fileStateMap = new java.util.LinkedHashMap<>();
+        
+        // 1. 读取 base manifest（如果存在）
+        String baseManifestListName = snapshot.getBaseManifestList();
+        if (baseManifestListName != null && !baseManifestListName.isEmpty()) {
+            long baseSnapshotId = extractSnapshotIdFromManifestList(baseManifestListName);
+            if (baseSnapshotId > 0) {
+                ManifestList baseList = cacheManager.getManifestList(
+                    table.pathFactory(),
+                    table.identifier().getDatabase(),
+                    table.identifier().getTable(),
+                    baseSnapshotId
+                );
+                mergeManifestListIntoMap(baseList, fileStateMap);
+                logger.debug("Loaded base manifest for snapshot {}, {} files", 
+                            baseSnapshotId, fileStateMap.size());
+            }
+        }
+        
+        // 2. 读取 delta manifest（如果存在）
+        String deltaManifestListName = snapshot.getDeltaManifestList();
+        if (deltaManifestListName != null && !deltaManifestListName.isEmpty()) {
+            long deltaSnapshotId = snapshot.getId();
+            ManifestList deltaList = cacheManager.getManifestList(
             table.pathFactory(),
             table.identifier().getDatabase(),
             table.identifier().getTable(),
-            snapshot.getId()
-        );
+                deltaSnapshotId
+            );
+            mergeManifestListIntoMap(deltaList, fileStateMap);
+            logger.debug("Merged delta manifest for snapshot {}, {} files now", 
+                        deltaSnapshotId, fileStateMap.size());
+        }
         
-        List<ManifestEntry> allEntries = new ArrayList<>();
-        for (ManifestFileMeta fileMeta : manifestList.getManifestFiles()) {
-            // 使用缓存加载每个 ManifestFile
-            String manifestId = fileMeta.getFileName();
+        // 3. 返回所有活跃文件
+        return new ArrayList<>(fileStateMap.values());
+    }
+    
+    /**
+     * 将 ManifestList 中的条目合并到文件状态映射中
+     */
+    private void mergeManifestListIntoMap(ManifestList manifestList, 
+                                         java.util.Map<String, ManifestEntry> fileStateMap) 
+            throws IOException {
+        for (ManifestFileMeta meta : manifestList.getManifestFiles()) {
+            String manifestId = meta.getFileName();
             if (manifestId.startsWith("manifest-")) {
                 manifestId = manifestId.substring("manifest-".length());
             }
@@ -157,18 +194,34 @@ public class FileStoreTableScan implements TableScan {
                 table.identifier().getTable(),
                 manifestId
             );
-            allEntries.addAll(manifestFile.getEntries());
-        }
-        
-        // 过滤掉被删除的文件
-        List<ManifestEntry> activeFiles = new ArrayList<>();
-        for (ManifestEntry entry : allEntries) {
-            if (entry.getKind() == ManifestEntry.FileKind.ADD) {
-                activeFiles.add(entry);
+            
+            for (ManifestEntry entry : manifestFile.getEntries()) {
+                String fileName = entry.getFile().getFileName();
+                if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                    fileStateMap.put(fileName, entry);
+                } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
+                    fileStateMap.remove(fileName);
+                }
             }
         }
-        
-        return activeFiles;
+    }
+    
+    /**
+     * 从 manifest list 文件名中提取快照 ID
+     */
+    private long extractSnapshotIdFromManifestList(String manifestListName) {
+        try {
+            if (manifestListName.startsWith("manifest-list-delta-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-delta-".length()));
+            } else if (manifestListName.startsWith("manifest-list-base-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-base-".length()));
+            } else if (manifestListName.startsWith("manifest-list-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-".length()));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Failed to extract snapshot ID from manifest list: {}", manifestListName, e);
+        }
+        return -1;
     }
     
     /**
