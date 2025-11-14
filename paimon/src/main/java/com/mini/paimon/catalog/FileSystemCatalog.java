@@ -1,7 +1,6 @@
 package com.mini.paimon.catalog;
 
 import com.mini.paimon.exception.CatalogException;
-import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.metadata.SchemaManager;
@@ -20,10 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;

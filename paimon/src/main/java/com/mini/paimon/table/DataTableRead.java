@@ -5,9 +5,9 @@ import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.reader.FileRecordReader;
+import com.mini.paimon.reader.KeyValueFileReader;
+import com.mini.paimon.reader.KeyValueFileReaderFactory;
 import com.mini.paimon.reader.RecordReader;
-import com.mini.paimon.reader.RecordReaderFactory;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,21 +19,20 @@ import java.util.List;
 
 /**
  * Data Table Read
- * 负责从数据文件中读取数据，支持投影和过滤
+ * 负责从数据文件中读取数据,支持投影和过滤
  * 参考 Paimon 的 DataTableRead 设计
  * 
- * 重构后的架构：
- * 1. 使用工业级 RecordReader 抽象
- * 2. 支持 Block 级别的懒加载和过滤
- * 3. 文件级过滤：通过 minKey/maxKey 跳过不相关的文件
- * 4. Block 级过滤：只读取包含符合条件数据的 Block
- * 5. 谓词和投影下推到 Reader 层
+ * 优化策略:
+ * 1. 文件级过滤: 通过 minKey/maxKey 和 manifest 统计信息跳过文件
+ * 2. 布隆过滤器: 快速排除不存在的键
+ * 3. Block Index: 定位数据块
+ * 4. 谓词和投影下推到 Reader 层
  */
 public class DataTableRead {
     private static final Logger logger = LoggerFactory.getLogger(DataTableRead.class);
     
     private final Schema schema;
-    private final RecordReaderFactory readerFactory;
+    private final KeyValueFileReaderFactory readerFactory;
     private final PathFactory pathFactory;
     private final String database;
     private final String table;
@@ -45,7 +44,7 @@ public class DataTableRead {
     
     public DataTableRead(Schema schema, PathFactory pathFactory, String database, String table) {
         this.schema = schema;
-        this.readerFactory = new RecordReaderFactory(schema);
+        this.readerFactory = new KeyValueFileReaderFactory(schema);
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
@@ -93,12 +92,11 @@ public class DataTableRead {
         int readFiles = 0;
         int skippedFiles = 0;
         
-        RecordReaderFactory factory = new RecordReaderFactory(schema);
+        // 注意: merge 时不能应用投影,因为需要主键进行排序
+        // 投影在 merge 后应用
+        KeyValueFileReaderFactory factory = new KeyValueFileReaderFactory(schema);
         if (predicate != null) {
             factory.withFilter(predicate);
-        }
-        if (startKey != null || endKey != null) {
-            factory.withKeyRange(startKey, endKey);
         }
         
         for (ManifestEntry entry : plan.getDataFiles()) {
@@ -119,10 +117,14 @@ public class DataTableRead {
             logger.debug("Reading file: {} (rows={}, size={})", 
                         fullFilePath, fileMeta.getRowCount(), fileMeta.getFileSize());
             
-            try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
+            try (KeyValueFileReader reader = factory.createReader(fullFilePath.toString())) {
+                RecordReader<Row> recordReader = startKey != null || endKey != null
+                    ? reader.readRange(startKey, endKey)
+                    : reader.readAll();
+                
                 List<Row> fileRows = new ArrayList<>();
                 Row row;
-                while ((row = reader.readRecord()) != null) {
+                while ((row = recordReader.readRecord()) != null) {
                     fileRows.add(row);
                 }
                 dataSources.add(fileRows.iterator());
@@ -131,6 +133,7 @@ public class DataTableRead {
         
         List<Row> result = com.mini.paimon.storage.MergeSortedReader.readAllFromIterators(schema, dataSources);
         
+        // 在 merge 后应用投影
         if (projection != null && !projection.isAll()) {
             List<Row> projectedResult = new ArrayList<>(result.size());
             for (Row row : result) {
@@ -150,15 +153,12 @@ public class DataTableRead {
         int skippedFiles = 0;
         int readFiles = 0;
         
-        RecordReaderFactory factory = new RecordReaderFactory(schema);
+        KeyValueFileReaderFactory factory = new KeyValueFileReaderFactory(schema);
         if (predicate != null) {
             factory.withFilter(predicate);
         }
         if (projection != null) {
             factory.withProjection(projection);
-        }
-        if (startKey != null || endKey != null) {
-            factory.withKeyRange(startKey, endKey);
         }
         
         for (ManifestEntry entry : plan.getDataFiles()) {
@@ -179,9 +179,13 @@ public class DataTableRead {
             logger.debug("Reading file: {} (rows={}, size={})", 
                         fullFilePath, fileMeta.getRowCount(), fileMeta.getFileSize());
             
-            try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
+            try (KeyValueFileReader reader = factory.createReader(fullFilePath.toString())) {
+                RecordReader<Row> recordReader = startKey != null || endKey != null
+                    ? reader.readRange(startKey, endKey)
+                    : reader.readAll();
+                
                 Row row;
-                while ((row = reader.readRecord()) != null) {
+                while ((row = recordReader.readRecord()) != null) {
                     result.add(row);
                 }
             }
@@ -201,15 +205,12 @@ public class DataTableRead {
             return;
         }
         
-        RecordReaderFactory factory = new RecordReaderFactory(schema);
+        KeyValueFileReaderFactory factory = new KeyValueFileReaderFactory(schema);
         if (predicate != null) {
             factory.withFilter(predicate);
         }
         if (projection != null) {
             factory.withProjection(projection);
-        }
-        if (startKey != null || endKey != null) {
-            factory.withKeyRange(startKey, endKey);
         }
         
         for (ManifestEntry entry : plan.getDataFiles()) {
@@ -220,14 +221,16 @@ public class DataTableRead {
                 continue;
             }
             
-            // 构建完整文件路径：table目录 + 相对路径
             Path fullFilePath = pathFactory.getTablePath(database, table)
                 .resolve(relativeFilePath);
             
-            try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
-                // 批量读取以提高性能
+            try (KeyValueFileReader reader = factory.createReader(fullFilePath.toString())) {
+                RecordReader<Row> recordReader = startKey != null || endKey != null
+                    ? reader.readRange(startKey, endKey)
+                    : reader.readAll();
+                
                 RecordReader.RecordBatch<Row> batch;
-                while ((batch = reader.readBatch(1000)) != null) {
+                while ((batch = recordReader.readBatch(1000)) != null) {
                     for (int i = 0; i < batch.size(); i++) {
                         consumer.accept(batch.get(i));
                     }

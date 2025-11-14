@@ -4,8 +4,9 @@ import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.reader.FileRecordReader;
-import com.mini.paimon.reader.RecordReaderFactory;
+import com.mini.paimon.reader.KeyValueFileReader;
+import com.mini.paimon.reader.KeyValueFileReaderFactory;
+import com.mini.paimon.reader.RecordReader;
 import com.mini.paimon.table.DataTableScan;
 import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Projection;
@@ -21,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 并行数据读取器
- * 支持多线程并行读取SST文件，提升大表查询性能
+ * 支持多线程并行读取SST文件,提升大表查询性能
  * 参考 Paimon ParallelReader 实现
  */
 public class ParallelDataReader implements AutoCloseable {
@@ -31,7 +32,7 @@ public class ParallelDataReader implements AutoCloseable {
     private final PathFactory pathFactory;
     private final String database;
     private final String table;
-    private final RecordReaderFactory readerFactory;
+    private final KeyValueFileReaderFactory readerFactory;
     
     private Projection projection;
     private Predicate predicate;
@@ -50,7 +51,7 @@ public class ParallelDataReader implements AutoCloseable {
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
-        this.readerFactory = new RecordReaderFactory(schema);
+        this.readerFactory = new KeyValueFileReaderFactory(schema);
         this.parallelism = Math.max(1, parallelism);
         this.executorService = createExecutorService(this.parallelism);
         this.ownExecutor = true;
@@ -72,7 +73,7 @@ public class ParallelDataReader implements AutoCloseable {
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
-        this.readerFactory = new RecordReaderFactory(schema);
+        this.readerFactory = new KeyValueFileReaderFactory(schema);
         this.executorService = executorService;
         this.ownExecutor = false;
         this.parallelism = Runtime.getRuntime().availableProcessors();
@@ -214,7 +215,7 @@ public class ParallelDataReader implements AutoCloseable {
         String relativeFilePath = fileMeta.getFileName();
         Path fullFilePath = pathFactory.getTablePath(database, table).resolve(relativeFilePath);
         
-        RecordReaderFactory factory = new RecordReaderFactory(schema);
+        KeyValueFileReaderFactory factory = new KeyValueFileReaderFactory(schema);
         if (predicate != null) {
             factory.withFilter(predicate);
         }
@@ -222,7 +223,8 @@ public class ParallelDataReader implements AutoCloseable {
             factory.withProjection(projection);
         }
         
-        try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
+        try (KeyValueFileReader kvReader = factory.createReader(fullFilePath.toString())) {
+            RecordReader<Row> reader = kvReader.readAll();
             Row row;
             while ((row = reader.readRecord()) != null) {
                 try {
@@ -330,7 +332,7 @@ public class ParallelDataReader implements AutoCloseable {
         public List<Row> call() throws Exception {
             List<Row> rows = new ArrayList<>();
             
-            RecordReaderFactory factory = new RecordReaderFactory(schema);
+            KeyValueFileReaderFactory factory = new KeyValueFileReaderFactory(schema);
             if (predicate != null) {
                 factory.withFilter(predicate);
             }
@@ -344,7 +346,8 @@ public class ParallelDataReader implements AutoCloseable {
                 Path fullFilePath = pathFactory.getTablePath(database, table)
                     .resolve(relativeFilePath);
                 
-                try (FileRecordReader reader = factory.createFileReader(fullFilePath.toString())) {
+                try (KeyValueFileReader kvReader = factory.createReader(fullFilePath.toString())) {
+                    RecordReader<Row> reader = kvReader.readAll();
                     Row row;
                     while ((row = reader.readRecord()) != null) {
                         rows.add(row);
