@@ -36,15 +36,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         }
         
         try {
+            // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
             com.mini.paimon.catalog.CatalogContext context = 
                 com.mini.paimon.catalog.CatalogContext.builder()
                     .warehouse(warehouse)
+                    .option("catalog.name", name)
+                    .option("catalog.default-database", "default")
                     .build();
-            this.catalog = new com.mini.paimon.catalog.FileSystemCatalog(
-                name, 
-                "default",
-                context
-            );
+            this.catalog = com.mini.paimon.catalog.CatalogLoader.load("filesystem", context);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize Paimon catalog", e);
         }

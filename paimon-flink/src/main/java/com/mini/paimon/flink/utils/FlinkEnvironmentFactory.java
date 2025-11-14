@@ -1,7 +1,8 @@
 package com.mini.paimon.flink.utils;
 
+import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
-import com.mini.paimon.catalog.FileSystemCatalog;
+import com.mini.paimon.catalog.CatalogLoader;
 import com.mini.paimon.flink.catalog.FlinkCatalog;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -20,10 +21,13 @@ public class FlinkEnvironmentFactory {
         
         TableEnvironment tableEnv = TableEnvironment.create(settings);
         
+        // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
         CatalogContext catalogContext = CatalogContext.builder()
             .warehouse(warehousePath)
+            .option("catalog.name", "paimon")
+            .option("catalog.default-database", defaultDatabase)
             .build();
-        FileSystemCatalog paimonCatalog = new FileSystemCatalog("paimon", warehousePath, catalogContext);
+        Catalog paimonCatalog = CatalogLoader.load("filesystem", catalogContext);
         
         FlinkCatalog flinkCatalog = new FlinkCatalog("paimon", paimonCatalog, defaultDatabase, warehousePath);
         
@@ -45,10 +49,13 @@ public class FlinkEnvironmentFactory {
         
         TableEnvironment tableEnv = TableEnvironment.create(settings);
         
+        // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
         CatalogContext catalogContext = CatalogContext.builder()
             .warehouse(warehousePath)
+            .option("catalog.name", "paimon")
+            .option("catalog.default-database", defaultDatabase)
             .build();
-        FileSystemCatalog paimonCatalog = new FileSystemCatalog("paimon", warehousePath, catalogContext);
+        Catalog paimonCatalog = CatalogLoader.load("filesystem", catalogContext);
         
         FlinkCatalog flinkCatalog = new FlinkCatalog("paimon", paimonCatalog, defaultDatabase, warehousePath);
         

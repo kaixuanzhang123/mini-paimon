@@ -1,7 +1,8 @@
 package com.mini.paimon.flink.table;
 
+import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
-import com.mini.paimon.catalog.FileSystemCatalog;
+import com.mini.paimon.catalog.CatalogLoader;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.table.Table;
 import com.mini.paimon.table.TableCommit;
@@ -22,7 +23,7 @@ public class PaimonSinkFunction implements SinkFunction<RowData> {
     private final ObjectPath tablePath;
     private final Map<String, String> options;
 
-    private transient FileSystemCatalog catalog;
+    private transient Catalog catalog;
     private transient Table table;
     private transient TableWrite tableWrite;
 
@@ -44,11 +45,14 @@ public class PaimonSinkFunction implements SinkFunction<RowData> {
     private void open() throws Exception {
         String warehouse = options.getOrDefault("warehouse", "warehouse");
 
+        // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
         CatalogContext catalogContext = CatalogContext.builder()
             .warehouse(warehouse)
+            .option("catalog.name", "paimon")
+            .option("catalog.default-database", tablePath.getDatabaseName())
             .build();
 
-        catalog = new FileSystemCatalog("paimon", tablePath.getDatabaseName(), catalogContext);
+        catalog = CatalogLoader.load("filesystem", catalogContext);
 
         Identifier identifier = new Identifier(tablePath.getDatabaseName(), tablePath.getObjectName());
         table = catalog.getTable(identifier);
