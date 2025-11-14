@@ -6,7 +6,7 @@ import org.apache.spark.sql.SparkSession;
 public class QuickStartExample {
 
     public static void main(String[] args) {
-        String warehousePath = "quickstart_warehouse";
+        String warehousePath = "./quickstart_warehouse";
         
         SparkSession spark = SparkSessionFactory.createSparkSession(warehousePath, "quickstart");
         

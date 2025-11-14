@@ -73,10 +73,13 @@ public class PaimonBatchWrite implements BatchWrite {
             );
             
             // 统一提交所有文件
+            // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
             CatalogContext context = CatalogContext.builder()
                 .warehouse(warehousePath)
+                .option("catalog.name", "paimon")
+                .option("catalog.default-database", database)
                 .build();
-            Catalog catalog = new FileSystemCatalog("paimon", "default", context);
+            Catalog catalog = com.mini.paimon.catalog.CatalogLoader.load("filesystem", context);
             Identifier identifier = new Identifier(database, tableName);
             Table paimonTable = catalog.getTable(identifier);
             

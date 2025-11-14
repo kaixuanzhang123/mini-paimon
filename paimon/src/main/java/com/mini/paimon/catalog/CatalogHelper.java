@@ -23,10 +23,13 @@ public class CatalogHelper {
     }
     
     public CatalogHelper(PathFactory pathFactory, String warehousePath, String defaultDatabase) {
+        // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
         CatalogContext context = CatalogContext.builder()
             .warehouse(warehousePath)
+            .option("catalog.name", "mini_paimon")
+            .option("catalog.default-database", defaultDatabase)
             .build();
-        this.catalog = new FileSystemCatalog("mini_paimon", defaultDatabase, context);
+        this.catalog = CatalogLoader.load("filesystem", context);
         this.defaultDatabase = defaultDatabase;
     }
     

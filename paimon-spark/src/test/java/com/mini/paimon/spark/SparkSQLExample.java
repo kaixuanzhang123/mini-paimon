@@ -8,7 +8,7 @@ import org.apache.spark.sql.SparkSession;
 public class SparkSQLExample {
 
     public static void main(String[] args) {
-        String warehousePath = "spark_warehouse";
+        String warehousePath = "./spark_warehouse";
         
         SparkSession spark = SparkSessionFactory.createSparkSession(warehousePath);
         
