@@ -30,6 +30,11 @@ public interface TableScan {
     TableScan withPartitionFilter(PartitionSpec partitionSpec);
     
     /**
+     * 设置行级过滤条件
+     */
+    TableScan withFilter(Predicate predicate);
+    
+    /**
      * 执行扫描，生成读取计划
      */
     Plan plan() throws IOException;

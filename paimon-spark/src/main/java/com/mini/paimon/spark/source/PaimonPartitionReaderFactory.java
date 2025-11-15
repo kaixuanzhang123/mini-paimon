@@ -4,6 +4,7 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.FileSystemCatalog;
 import com.mini.paimon.catalog.Identifier;
+import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Table;
 import org.apache.spark.sql.connector.read.InputPartition;
 import org.apache.spark.sql.connector.read.PartitionReader;
@@ -21,20 +22,20 @@ public class PaimonPartitionReaderFactory implements PartitionReaderFactory, Ser
     private final String warehousePath;
     private final String database;
     private final String tableName;
+    private final Predicate predicate;
 
-    public PaimonPartitionReaderFactory(String warehousePath, String database, String tableName) {
+    public PaimonPartitionReaderFactory(String warehousePath, String database, String tableName, Predicate predicate) {
         this.warehousePath = warehousePath;
         this.database = database;
         this.tableName = tableName;
+        this.predicate = predicate;
     }
 
     @Override
     public PartitionReader<org.apache.spark.sql.catalyst.InternalRow> createReader(InputPartition partition) {
         PaimonInputPartition paimonPartition = (PaimonInputPartition) partition;
         
-        // 在 worker 节点上重新创建 Table 对象
         try {
-            // 使用 CatalogLoader 通过 SPI 机制加载 Catalog
             CatalogContext context = CatalogContext.builder()
                 .warehouse(warehousePath)
                 .option("catalog.name", "paimon")
@@ -44,8 +45,12 @@ public class PaimonPartitionReaderFactory implements PartitionReaderFactory, Ser
             Identifier identifier = new Identifier(database, tableName);
             Table paimonTable = catalog.getTable(identifier);
             
-            LOG.info("Created PaimonPartitionReader for {}.{}", database, tableName);
-            return new PaimonPartitionReader(paimonTable);
+            if (predicate != null) {
+                LOG.info("Created PaimonPartitionReader for {}.{} with filter: {}", database, tableName, predicate);
+            } else {
+                LOG.info("Created PaimonPartitionReader for {}.{}", database, tableName);
+            }
+            return new PaimonPartitionReader(paimonTable, predicate);
         } catch (Exception e) {
             LOG.error("Failed to create PaimonPartitionReader", e);
             throw new RuntimeException("Failed to create PaimonPartitionReader", e);

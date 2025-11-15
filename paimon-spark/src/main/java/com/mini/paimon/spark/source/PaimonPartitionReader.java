@@ -3,6 +3,7 @@ package com.mini.paimon.spark.source;
 import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.spark.table.SparkRowConverter;
+import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Table;
 import com.mini.paimon.table.TableRead;
 import com.mini.paimon.table.TableScan;
@@ -20,17 +21,25 @@ public class PaimonPartitionReader implements PartitionReader<InternalRow> {
     private static final Logger LOG = LoggerFactory.getLogger(PaimonPartitionReader.class);
 
     private final Table paimonTable;
+    private final Predicate predicate;
     private Iterator<Row> rowIterator;
     private InternalRow currentRow;
 
-    public PaimonPartitionReader(Table paimonTable) {
+    public PaimonPartitionReader(Table paimonTable, Predicate predicate) {
         this.paimonTable = paimonTable;
+        this.predicate = predicate;
         initialize();
     }
 
     private void initialize() {
         try {
             TableScan scan = paimonTable.newScan();
+            
+            if (predicate != null) {
+                LOG.info("Applying filter predicate to scan: {}", predicate);
+                scan = scan.withFilter(predicate);
+            }
+            
             TableScan.Plan plan = scan.plan();
 
             LOG.info("Initializing PaimonPartitionReader for table {}.{}", 
@@ -48,7 +57,7 @@ public class PaimonPartitionReader implements PartitionReader<InternalRow> {
                 return;
             }
             
-            LOG.info("Found {} files in scan plan", plan.files().size());
+            LOG.info("Scan plan generated with {} files", plan.files().size());
 
             TableRead read = paimonTable.newRead();
             List<Row> allRows = read.read(plan);

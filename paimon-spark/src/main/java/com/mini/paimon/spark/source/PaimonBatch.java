@@ -1,5 +1,6 @@
 package com.mini.paimon.spark.source;
 
+import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Table;
 import org.apache.spark.sql.connector.read.Batch;
 import org.apache.spark.sql.connector.read.InputPartition;
@@ -9,15 +10,16 @@ public class PaimonBatch implements Batch {
 
     private final Table paimonTable;
     private final String warehousePath;
+    private final Predicate predicate;
 
-    public PaimonBatch(Table paimonTable, String warehousePath) {
+    public PaimonBatch(Table paimonTable, String warehousePath, Predicate predicate) {
         this.paimonTable = paimonTable;
         this.warehousePath = warehousePath;
+        this.predicate = predicate;
     }
 
     @Override
     public InputPartition[] planInputPartitions() {
-        // 简单情况下只创建一个分区
         return new InputPartition[]{new PaimonInputPartition(0)};
     }
 
@@ -25,7 +27,7 @@ public class PaimonBatch implements Batch {
     public PartitionReaderFactory createReaderFactory() {
         String database = paimonTable.identifier().getDatabase();
         String tableName = paimonTable.identifier().getTable();
-        return new PaimonPartitionReaderFactory(warehousePath, database, tableName);
+        return new PaimonPartitionReaderFactory(warehousePath, database, tableName, predicate);
     }
 }
 

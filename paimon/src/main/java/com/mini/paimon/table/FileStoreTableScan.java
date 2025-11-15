@@ -1,6 +1,9 @@
 package com.mini.paimon.table;
 
 import com.mini.paimon.filter.PartitionPredicate;
+import com.mini.paimon.index.IndexFileManager;
+import com.mini.paimon.index.IndexSelector;
+import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.manifest.ManifestCacheManager;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
@@ -30,6 +33,9 @@ public class FileStoreTableScan implements TableScan {
     
     // 分区过滤条件（统一使用 PartitionPredicate ）
     private PartitionPredicate partitionPredicate;
+    
+    // 行级过滤条件
+    private Predicate rowFilter;
     
     // Manifest缓存管理器
     private static final ManifestCacheManager cacheManager = new ManifestCacheManager();
@@ -78,6 +84,12 @@ public class FileStoreTableScan implements TableScan {
         return this;
     }
     
+    @Override
+    public TableScan withFilter(Predicate predicate) {
+        this.rowFilter = predicate;
+        return this;
+    }
+    
     /**
      * 启用增量读取模式
      */
@@ -114,6 +126,11 @@ public class FileStoreTableScan implements TableScan {
         // 应用分区过滤（统一使用 PartitionPredicate）
         if (partitionPredicate != null) {
             files = filterByPartitionPredicate(files);
+        }
+        
+        // 应用行级过滤（使用索引加速）
+        if (rowFilter != null) {
+            files = filterWithIndex(files);
         }
         
         logger.debug("Scanned snapshot {} with {} files", 
@@ -365,6 +382,39 @@ public class FileStoreTableScan implements TableScan {
                    filtered.size(), entries.size(), partitionPredicate);
         
         return filtered;
+    }
+    
+    /**
+     * 使用索引过滤数据文件
+     */
+    private List<ManifestEntry> filterWithIndex(List<ManifestEntry> entries) throws IOException {
+        if (entries.isEmpty()) {
+            return entries;
+        }
+        
+        IndexFileManager indexFileManager = new IndexFileManager(table.pathFactory());
+        IndexSelector indexSelector = new IndexSelector(
+            indexFileManager,
+            table.identifier().getDatabase(),
+            table.identifier().getTable()
+        );
+        
+        List<DataFileMeta> dataFileMetas = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            dataFileMetas.add(entry.getFile());
+        }
+        
+        List<DataFileMeta> filtered = indexSelector.filterWithIndex(dataFileMetas, rowFilter);
+        
+        List<ManifestEntry> result = new ArrayList<>();
+        for (DataFileMeta meta : filtered) {
+            result.add(new ManifestEntry(ManifestEntry.FileKind.ADD, 0, meta));
+        }
+        
+        logger.info("Index filter: {} files matched out of {} (filter: {})",
+                   result.size(), entries.size(), rowFilter);
+        
+        return result;
     }
     
     /**

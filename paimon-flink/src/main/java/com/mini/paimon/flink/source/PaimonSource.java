@@ -6,8 +6,10 @@ import com.mini.paimon.catalog.CatalogLoader;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.flink.table.FlinkRowConverter;
 import com.mini.paimon.metadata.Row;
+import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Table;
 import com.mini.paimon.table.TableRead;
+import com.mini.paimon.table.TableScan;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
@@ -15,24 +17,34 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.RowType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
 
 public class PaimonSource extends RichSourceFunction<RowData> implements ResultTypeQueryable<RowData> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PaimonSource.class);
+    
     private final ObjectPath tablePath;
     private final Map<String, String> options;
     private final RowType rowType;
+    private final Predicate predicate;
 
     private volatile boolean isRunning = true;
     private transient Catalog catalog;
     private transient Table table;
 
     public PaimonSource(ObjectPath tablePath, Map<String, String> options, RowType rowType) {
+        this(tablePath, options, rowType, null);
+    }
+    
+    public PaimonSource(ObjectPath tablePath, Map<String, String> options, RowType rowType, Predicate predicate) {
         this.tablePath = tablePath;
         this.options = options;
         this.rowType = rowType;
+        this.predicate = predicate;
     }
 
     @Override
@@ -54,10 +66,22 @@ public class PaimonSource extends RichSourceFunction<RowData> implements ResultT
 
     @Override
     public void run(SourceContext<RowData> ctx) throws Exception {
-        TableRead tableRead = table.newRead();
-        com.mini.paimon.table.TableScan.Plan plan = table.newScan().plan();
+        TableScan scan = table.newScan();
         
+        if (predicate != null) {
+            LOG.info("Applying filter predicate: {}", predicate);
+            scan = scan.withFilter(predicate);
+        }
+        
+        TableScan.Plan plan = scan.plan();
+        
+        LOG.info("Scan plan generated with {} files", plan.files().size());
+        
+        TableRead tableRead = table.newRead();
         List<Row> rows = tableRead.read(plan);
+        
+        LOG.info("Read {} rows from table", rows.size());
+        
         for (Row row : rows) {
             if (!isRunning) {
                 break;
