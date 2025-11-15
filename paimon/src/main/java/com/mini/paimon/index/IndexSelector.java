@@ -103,6 +103,9 @@ public class IndexSelector {
         for (Predicate.FieldPredicate predicate : predicates) {
             if (!evaluatePredicate(fileMeta, predicate, indexMap)) {
                 // 任何一个谓词判定文件不包含数据，就可以跳过该文件
+                logger.debug("File {} filtered out by predicate: {} {} {}", 
+                           fileMeta.getFileName(), predicate.getFieldName(), 
+                           predicate.getOp(), predicate.getValue());
                 return false;
             }
         }
