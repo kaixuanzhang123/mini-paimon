@@ -105,6 +105,45 @@ public class Row {
         return type.isCompatible(value);
     }
 
+    /**
+     * 从行中提取主键
+     * 
+     * @param schema Schema定义
+     * @return RowKey 对象
+     * @throws IllegalStateException 如果表没有主键
+     */
+    public RowKey extractKey(Schema schema) {
+        if (!schema.hasPrimaryKey()) {
+            throw new IllegalStateException("Cannot extract key from schema without primary key");
+        }
+        
+        List<String> primaryKeys = schema.getPrimaryKeys();
+        List<Field> fields = schema.getFields();
+        
+        // 构建主键值数组
+        Object[] keyValues = new Object[primaryKeys.size()];
+        for (int i = 0; i < primaryKeys.size(); i++) {
+            String pkName = primaryKeys.get(i);
+            
+            // 查找主键字段的索引
+            int fieldIndex = -1;
+            for (int j = 0; j < fields.size(); j++) {
+                if (fields.get(j).getName().equals(pkName)) {
+                    fieldIndex = j;
+                    break;
+                }
+            }
+            
+            if (fieldIndex == -1) {
+                throw new IllegalStateException("Primary key field not found: " + pkName);
+            }
+            
+            keyValues[i] = getValue(fieldIndex);
+        }
+        
+        return RowKey.fromValues(keyValues, schema);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

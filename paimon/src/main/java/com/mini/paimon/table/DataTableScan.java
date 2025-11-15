@@ -82,51 +82,79 @@ public class DataTableScan {
                     snapshot.getSnapshotId(), database, table);
         
         // 2. 从快照中读取 ManifestList
-        // 优先使用 deltaManifestList，如果不存在则使用 baseManifestList
-        String manifestListName = snapshot.getDeltaManifestList();
-        if (manifestListName == null || manifestListName.isEmpty()) {
-            manifestListName = snapshot.getBaseManifestList();
-        }
+        // 需要读取 base + delta 来获取所有数据文件
+        List<DataFileMeta> dataFileMetas = new ArrayList<>();
+        long snapshotIdValue = snapshot.getSnapshotId();
         
-        ManifestList manifestList;
-        if (manifestListName != null) {
-            // 根据文件名类型选择正确的加载方法
-            long snapshotId = snapshot.getSnapshotId();
-            if (manifestListName.startsWith("manifest-list-delta-")) {
-                manifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotId);
-            } else if (manifestListName.startsWith("manifest-list-base-")) {
-                manifestList = ManifestList.loadBase(pathFactory, database, table, snapshotId);
+        // 2.1 读取 base manifest list (如果存在)
+        String baseManifestListName = snapshot.getBaseManifestList();
+        if (baseManifestListName != null && !baseManifestListName.isEmpty()) {
+            // 从manifest list文件名中提取正确的快照ID
+            long baseSnapshotId = extractSnapshotIdFromManifestList(baseManifestListName);
+            if (baseSnapshotId < 0) {
+                baseSnapshotId = snapshotIdValue; // fallback
+            }
+            
+            logger.debug("Loading base manifest list: {} with snapshot ID: {}", 
+                        baseManifestListName, baseSnapshotId);
+            
+            ManifestList baseManifestList;
+            if (baseManifestListName.startsWith("manifest-list-base-")) {
+                baseManifestList = ManifestList.loadBase(pathFactory, database, table, baseSnapshotId);
+            } else if (baseManifestListName.startsWith("manifest-list-delta-")) {
+                // 如果base指向delta文件（首次提交的情况）
+                baseManifestList = ManifestList.loadDelta(pathFactory, database, table, baseSnapshotId);
             } else {
                 // 兼容旧格式
-                manifestList = ManifestList.load(pathFactory, database, table, snapshotId);
+                baseManifestList = ManifestList.load(pathFactory, database, table, baseSnapshotId);
             }
-        } else {
-            throw new IOException("No manifest list found in snapshot " + snapshot.getSnapshotId());
-        }
-        
-        // 3. 读取所有 Manifest 文件，获取数据文件列表
-        List<DataFileMeta> dataFileMetas = new ArrayList<>();
-        for (ManifestFileMeta manifestFileMeta : manifestList.getManifestFiles()) {
-            // 从文件名中提取ID
-            String manifestFileName = manifestFileMeta.getFileName();
-            String manifestId = manifestFileName.substring("manifest-".length());
-            ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
             
-            // 只收集 ADD 类型的文件
-            for (ManifestEntry entry : manifest.getEntries()) {
-                if (entry.getKind() == ManifestEntry.FileKind.ADD) {
-                    dataFileMetas.add(entry.getFile());
+            // 读取 base manifest 中的数据文件
+            for (ManifestFileMeta manifestFileMeta : baseManifestList.getManifestFiles()) {
+                String manifestFileName = manifestFileMeta.getFileName();
+                String manifestId = manifestFileName.substring("manifest-".length());
+                ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
+                
+                for (ManifestEntry entry : manifest.getEntries()) {
+                    if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                        dataFileMetas.add(entry.getFile());
+                    }
                 }
             }
         }
         
-        // 4. 使用索引过滤数据文件
+        // 2.2 读取 delta manifest list (如果存在且与base不同)
+        String deltaManifestListName = snapshot.getDeltaManifestList();
+        if (deltaManifestListName != null && !deltaManifestListName.isEmpty() 
+            && !deltaManifestListName.equals(baseManifestListName)) {
+            ManifestList deltaManifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotIdValue);
+            
+            // 读取 delta manifest 中的数据文件
+            for (ManifestFileMeta manifestFileMeta : deltaManifestList.getManifestFiles()) {
+                String manifestFileName = manifestFileMeta.getFileName();
+                String manifestId = manifestFileName.substring("manifest-".length());
+                ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
+                
+                for (ManifestEntry entry : manifest.getEntries()) {
+                    if (entry.getKind() == ManifestEntry.FileKind.ADD) {
+                        dataFileMetas.add(entry.getFile());
+                    }
+                }
+            }
+        }
+        
+        // 如果既没有 base 也没有 delta，抛出异常
+        if (baseManifestListName == null && deltaManifestListName == null) {
+            throw new IOException("No manifest list found in snapshot " + snapshot.getSnapshotId());
+        }
+        
+        // 3. 使用索引过滤数据文件
         if (predicate != null) {
             IndexSelector indexSelector = new IndexSelector(indexFileManager, database, table);
             dataFileMetas = indexSelector.filterWithIndex(dataFileMetas, predicate);
         }
         
-        // 5. 转换为 ManifestEntry 列表
+        // 4. 转换为 ManifestEntry 列表
         List<ManifestEntry> dataFiles = new ArrayList<>();
         for (DataFileMeta fileMeta : dataFileMetas) {
             dataFiles.add(new ManifestEntry(ManifestEntry.FileKind.ADD, 0, fileMeta));
@@ -136,6 +164,25 @@ public class DataTableScan {
                    dataFiles.size(), snapshot.getSnapshotId());
         
         return new Plan(snapshot, dataFiles);
+    }
+    
+    /**
+     * 从manifest list文件名中提取快照ID
+     * 例如：manifest-list-delta-123 -> 123
+     */
+    private long extractSnapshotIdFromManifestList(String manifestListName) {
+        try {
+            if (manifestListName.startsWith("manifest-list-delta-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-delta-".length()));
+            } else if (manifestListName.startsWith("manifest-list-base-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-base-".length()));
+            } else if (manifestListName.startsWith("manifest-list-")) {
+                return Long.parseLong(manifestListName.substring("manifest-list-".length()));
+            }
+        } catch (NumberFormatException e) {
+            logger.warn("Failed to extract snapshot ID from manifest list: {}", manifestListName, e);
+        }
+        return -1;
     }
     
     /**

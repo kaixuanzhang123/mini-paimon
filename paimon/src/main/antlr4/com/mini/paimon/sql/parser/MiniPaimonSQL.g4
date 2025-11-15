@@ -34,7 +34,11 @@ dropTableStatement
 insertStatement
     : INSERT INTO qualifiedName
       ('(' identifier (',' identifier)* ')')?
-      VALUES '(' expression (',' expression)* ')'
+      VALUES valuesRow (',' valuesRow)*
+    ;
+
+valuesRow
+    : '(' expression (',' expression)* ')'
     ;
 
 // SELECT

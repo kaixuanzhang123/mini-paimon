@@ -60,6 +60,80 @@ public class RowKey implements Comparable<RowKey>, java.io.Serializable {
     }
 
     /**
+     * 从主键值数组创建 RowKey
+     * 
+     * @param keyValues 主键值数组
+     * @param schema 表结构
+     * @return RowKey对象
+     */
+    public static RowKey fromValues(Object[] keyValues, Schema schema) {
+        if (!schema.hasPrimaryKey()) {
+            throw new IllegalArgumentException("Schema has no primary key");
+        }
+        
+        List<String> primaryKeys = schema.getPrimaryKeys();
+        if (keyValues.length != primaryKeys.size()) {
+            throw new IllegalArgumentException(
+                String.format("Key values count mismatch: expected %d, got %d", 
+                    primaryKeys.size(), keyValues.length));
+        }
+        
+        // 计算所需的字节数
+        int totalSize = 0;
+        List<Field> fields = schema.getFields();
+        for (int i = 0; i < primaryKeys.size(); i++) {
+            String pkName = primaryKeys.get(i);
+            Field field = null;
+            for (Field f : fields) {
+                if (f.getName().equals(pkName)) {
+                    field = f;
+                    break;
+                }
+            }
+            if (field == null) {
+                throw new IllegalArgumentException("Primary key field not found: " + pkName);
+            }
+            
+            DataType type = field.getType();
+            if (type instanceof DataType.IntType) {
+                totalSize += 4;
+            } else if (type instanceof DataType.LongType) {
+                totalSize += 8;
+            } else if (type instanceof DataType.BooleanType) {
+                totalSize += 1;
+            } else if (type instanceof DataType.StringType) {
+                String str = keyValues[i] != null ? keyValues[i].toString() : "";
+                totalSize += 4 + str.getBytes(StandardCharsets.UTF_8).length;
+            } else {
+                throw new IllegalArgumentException("Unsupported primary key type: " + type);
+            }
+        }
+        
+        // 序列化主键值
+        ByteBuffer buffer = ByteBuffer.allocate(totalSize);
+        for (int i = 0; i < primaryKeys.size(); i++) {
+            String pkName = primaryKeys.get(i);
+            Field field = null;
+            for (Field f : fields) {
+                if (f.getName().equals(pkName)) {
+                    field = f;
+                    break;
+                }
+            }
+            
+            Object value = keyValues[i];
+            if (value == null) {
+                throw new IllegalArgumentException(
+                    "Primary key field '" + pkName + "' cannot be null");
+            }
+            
+            serializeValue(buffer, value, field.getType());
+        }
+        
+        return new RowKey(buffer.array());
+    }
+
+    /**
      * 计算主键序列化后的大小
      */
     private static int calculateKeySize(Row row, Schema schema, List<Integer> pkIndices) {

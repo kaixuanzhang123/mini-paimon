@@ -127,11 +127,12 @@ public class AppendOnlyWriter implements RecordWriter {
         
         // 创建文件元信息
         // 注意: CSV 文件没有 minKey/maxKey 的概念,使用 null
+        // CsvWriter.getRowCount() 已经只统计数据行（不包括表头），所以这里不需要再减1
         String fileName = filePath.getFileName().toString();
         DataFileMeta fileMeta = new DataFileMeta(
             fileName,
             fileSize,
-            rowCount - 1,  // 减去表头行
+            rowCount,  // CsvWriter已经返回实际数据行数
             null,  // CSV 文件没有 minKey
             null,  // CSV 文件没有 maxKey
             schema.getSchemaId(),
@@ -142,7 +143,7 @@ public class AppendOnlyWriter implements RecordWriter {
         flushedFiles.add(fileMeta);
         
         logger.info("Closed CSV file: {}, rows: {}, size: {} bytes", 
-            fileName, rowCount - 1, fileSize);
+            fileName, rowCount, fileSize);
     }
     
     @Override

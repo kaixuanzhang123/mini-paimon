@@ -15,7 +15,7 @@ import java.io.File;
 public class SQLIndexConfigExample {
     
     public static void main(String[] args) throws Exception {
-        String warehouse = "warehouse_sql_index_demo";
+        String warehouse = "./warehouse_sql_index_demo";
         
         // 创建 Catalog
         CatalogContext context = CatalogContext.builder()

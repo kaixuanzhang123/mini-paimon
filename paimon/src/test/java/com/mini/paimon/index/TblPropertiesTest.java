@@ -27,9 +27,8 @@ public class TblPropertiesTest {
     
     public static void main(String[] args) throws Exception {
         // 创建临时目录
-        Path tempDir = Files.createTempDirectory("mini-paimon-test");
-        String warehousePath = tempDir.toAbsolutePath().toString();
-        
+        String warehousePath = "./warehouse_sql_index_demo";
+
         // 初始化 Catalog
         CatalogContext context = CatalogContext.builder()
                 .warehouse(warehousePath)

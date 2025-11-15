@@ -164,23 +164,34 @@ public class SQLParserV2 {
                     }
                 }
                 
-                // 解析值
-                Object[] rowValues = new Object[schema.getFields().size()];
-                List<MiniPaimonSQLParser.ExpressionContext> expressions = ctx.expression();
-                
-                for (int i = 0; i < expressions.size(); i++) {
-                    String columnName = columnNames.get(i);
-                    int fieldIndex = schema.getFieldIndex(columnName);
-                    if (fieldIndex >= 0) {
-                        Field field = schema.getFields().get(fieldIndex);
-                        rowValues[fieldIndex] = parseValue(expressions.get(i), field.getType());
-                    }
-                }
-                
                 // 插入数据
                 Table table = catalog.getTable(identifier);
                 try (TableWrite writer = table.newWrite()) {
-                    writer.write(new Row(rowValues));
+                    // 遍历所有值组
+                    int rowCount = 0;
+                    List<MiniPaimonSQLParser.ValuesRowContext> valuesRows = ctx.valuesRow();
+                    logger.info("Parsed {} value rows from INSERT statement", valuesRows.size());
+                    
+                    for (MiniPaimonSQLParser.ValuesRowContext valuesRow : valuesRows) {
+                        // 解析单行的值
+                        Object[] rowValues = new Object[schema.getFields().size()];
+                        List<MiniPaimonSQLParser.ExpressionContext> expressions = valuesRow.expression();
+                        
+                        for (int i = 0; i < expressions.size(); i++) {
+                            String columnName = columnNames.get(i);
+                            int fieldIndex = schema.getFieldIndex(columnName);
+                            if (fieldIndex >= 0) {
+                                Field field = schema.getFields().get(fieldIndex);
+                                rowValues[fieldIndex] = parseValue(expressions.get(i), field.getType());
+                            }
+                        }
+                        
+                        logger.debug("Writing row: {}", java.util.Arrays.toString(rowValues));
+                        writer.write(new Row(rowValues));
+                        rowCount++;
+                    }
+                    
+                    logger.info("Wrote {} rows to writer", rowCount);
                     TableWrite.TableCommitMessage commitMessage = writer.prepareCommit();
                     TableCommit commit = table.newCommit();
                     commit.commit(commitMessage, Snapshot.CommitKind.APPEND);
