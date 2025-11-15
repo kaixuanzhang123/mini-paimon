@@ -3,6 +3,7 @@ package com.mini.paimon.table;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.metadata.TableMetadata;
 import com.mini.paimon.partition.PartitionManager;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
@@ -27,6 +28,7 @@ public class FileStoreTable implements Table {
     private final PathFactory pathFactory;
     private final SnapshotManager snapshotManager;
     private final PartitionManager partitionManager;
+    private final TableMetadata tableMetadata;
 
     public FileStoreTable(Catalog catalog, Identifier identifier, Schema schema, PathFactory pathFactory) {
         this.catalog = catalog;
@@ -44,8 +46,24 @@ public class FileStoreTable implements Table {
                 identifier.getTable(),
                 schema.getPartitionKeys()
         );
+        
+        // 加载表元数据（包含索引配置）
+        TableMetadata metadata = null;
+        try {
+            metadata = catalog.getTableMetadata(identifier);
+        } catch (Exception e) {
+            logger.warn("Failed to load table metadata for {}, using empty metadata", identifier, e);
+        }
+        this.tableMetadata = metadata;
 
         logger.debug("Created FileStoreTable for {}", identifier);
+    }
+    
+    /**
+     * 获取表元数据
+     */
+    public TableMetadata tableMetadata() {
+        return tableMetadata;
     }
 
     @Override

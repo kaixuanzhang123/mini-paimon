@@ -1,9 +1,11 @@
 package com.mini.paimon.table;
 
+import com.mini.paimon.index.IndexType;
 import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.metadata.TableMetadata;
 import com.mini.paimon.metadata.TableType;
 import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.storage.AppendOnlyWriter;
@@ -91,8 +93,24 @@ public class TableWrite implements AutoCloseable {
             return new MergeTreeWriter(schema, table.pathFactory(), database, tableName, writerId);
         } else {
             // 仅追加表: 使用 AppendOnlyWriter
-            return new AppendOnlyWriter(schema, table.pathFactory(), database, tableName, writerId);
+            // 获取索引配置
+            Map<String, List<IndexType>> indexConfig = getIndexConfig();
+            return new AppendOnlyWriter(schema, table.pathFactory(), database, tableName, writerId, indexConfig);
         }
+    }
+    
+    /**
+     * 获取索引配置
+     */
+    private Map<String, List<IndexType>> getIndexConfig() {
+        if (table instanceof FileStoreTable) {
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            TableMetadata metadata = fileStoreTable.tableMetadata();
+            if (metadata != null) {
+                return metadata.getIndexConfig();
+            }
+        }
+        return new HashMap<>();
     }
     
     /**

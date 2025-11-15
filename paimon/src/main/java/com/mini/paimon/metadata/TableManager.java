@@ -85,24 +85,26 @@ public class TableManager {
         // 创建初始 Schema 版本
         Schema initialSchema = schemaManager.createNewSchemaVersion(fields, primaryKeys, partitionKeys);
         
-        // 创建表元数据（仅用于内存管理，包含索引配置但不持久化）
+        // 创建表元数据（包含索引配置）
         TableMetadata tableMetadata = TableMetadata.newBuilder(tableName, database, initialSchema.getSchemaId())
                 .indexConfig(indexConfig)
                 .build();
         
-        // 关键修复：不再持久化 metadata 文件
-        // Paimon 中表的元数据通过 Schema 文件管理
-        // 索引配置保存在内存中，通过 getTableMetadata 获取
+        // 持久化 metadata 文件（索引配置必须持久化）
+        tableMetadata.persist(pathFactory);
         
         logger.info("Successfully created table {}/{} with schema version {}", 
                    database, tableName, initialSchema.getSchemaId());
+        if (!indexConfig.isEmpty()) {
+            logger.info("Index configuration: {}", indexConfig);
+        }
         
         return tableMetadata;
     }
 
     /**
      * 获取表元数据
-     * 从 Schema 动态构建，不依赖 metadata 文件
+     * 从持久化文件加载，包含索引配置
      * 
      * @param database 数据库名
      * @param tableName 表名
@@ -114,11 +116,14 @@ public class TableManager {
             throw new IOException("Table not found: " + database + "." + tableName);
         }
         
-        // 从 SchemaManager 获取当前 Schema
+        // 尝试从文件加载 metadata
+        if (TableMetadata.exists(pathFactory, database, tableName)) {
+            return TableMetadata.load(pathFactory, database, tableName);
+        }
+        
+        // 兼容旧版本：如果 metadata 文件不存在，从 Schema 动态构建
         SchemaManager schemaManager = getSchemaManager(database, tableName);
         Schema currentSchema = schemaManager.getCurrentSchema();
-        
-        // 动态构建 TableMetadata
         return new TableMetadata(tableName, database, currentSchema.getSchemaId());
     }
 
