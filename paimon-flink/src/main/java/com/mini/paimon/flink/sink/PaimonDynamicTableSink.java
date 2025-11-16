@@ -7,6 +7,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.SinkFunctionProvider;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.types.RowKind;
 
 import java.util.Map;
 
@@ -22,7 +23,11 @@ public class PaimonDynamicTableSink implements DynamicTableSink, SupportsPartiti
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        return ChangelogMode.insertOnly();
+        ChangelogMode.Builder builder = ChangelogMode.newBuilder();
+        builder.addContainedKind(RowKind.INSERT);
+        builder.addContainedKind(RowKind.UPDATE_AFTER);
+        builder.addContainedKind(RowKind.DELETE);
+        return builder.build();
     }
 
     @Override

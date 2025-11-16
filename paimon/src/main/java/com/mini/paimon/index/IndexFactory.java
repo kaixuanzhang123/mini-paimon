@@ -20,6 +20,8 @@ public class IndexFactory {
                 return new BloomFilterIndex(fieldName);
             case MIN_MAX:
                 return new MinMaxIndex(fieldName);
+            case BITMAP:
+                return new BitmapIndex(fieldName);
             default:
                 throw new IllegalArgumentException("Unsupported index type: " + indexType);
         }

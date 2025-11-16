@@ -263,4 +263,92 @@ public class SchemaManager {
     public PathFactory getPathFactory() {
         return pathFactory;
     }
+    
+    /**
+     * 添加列到当前 Schema
+     * 
+     * @param newField 要添加的字段
+     * @return 新的 Schema
+     * @throws IOException IO 异常
+     */
+    public synchronized Schema addColumn(Field newField) throws IOException {
+        Schema current = getCurrentSchema();
+        java.util.List<Field> newFields = new java.util.ArrayList<>(current.getFields());
+        newFields.add(newField);
+        return createNewSchemaVersion(newFields, current.getPrimaryKeys(), current.getPartitionKeys());
+    }
+    
+    /**
+     * 删除列从当前 Schema
+     * 
+     * @param fieldName 要删除的字段名
+     * @return 新的 Schema
+     * @throws IOException IO 异常
+     */
+    public synchronized Schema dropColumn(String fieldName) throws IOException {
+        Schema current = getCurrentSchema();
+        java.util.List<Field> newFields = new java.util.ArrayList<>();
+        
+        boolean found = false;
+        for (Field field : current.getFields()) {
+            if (!field.getName().equals(fieldName)) {
+                newFields.add(field);
+            } else {
+                found = true;
+            }
+        }
+        
+        if (!found) {
+            throw new IllegalArgumentException("Field not found: " + fieldName);
+        }
+        
+        // 确保主键和分区键不包含被删除的字段
+        java.util.List<String> newPrimaryKeys = new java.util.ArrayList<>(current.getPrimaryKeys());
+        newPrimaryKeys.remove(fieldName);
+        
+        java.util.List<String> newPartitionKeys = new java.util.ArrayList<>(current.getPartitionKeys());
+        newPartitionKeys.remove(fieldName);
+        
+        return createNewSchemaVersion(newFields, newPrimaryKeys, newPartitionKeys);
+    }
+    
+    /**
+     * 重命名列
+     * 
+     * @param oldName 旧字段名
+     * @param newName 新字段名
+     * @return 新的 Schema
+     * @throws IOException IO 异常
+     */
+    public synchronized Schema renameColumn(String oldName, String newName) throws IOException {
+        Schema current = getCurrentSchema();
+        java.util.List<Field> newFields = new java.util.ArrayList<>();
+        
+        boolean found = false;
+        for (Field field : current.getFields()) {
+            if (field.getName().equals(oldName)) {
+                newFields.add(new Field(newName, field.getType(), field.isNullable()));
+                found = true;
+            } else {
+                newFields.add(field);
+            }
+        }
+        
+        if (!found) {
+            throw new IllegalArgumentException("Field not found: " + oldName);
+        }
+        
+        // 更新主键和分区键中的字段名
+        java.util.List<String> newPrimaryKeys = new java.util.ArrayList<>();
+        for (String pk : current.getPrimaryKeys()) {
+            newPrimaryKeys.add(pk.equals(oldName) ? newName : pk);
+        }
+        
+        java.util.List<String> newPartitionKeys = new java.util.ArrayList<>();
+        for (String partKey : current.getPartitionKeys()) {
+            newPartitionKeys.add(partKey.equals(oldName) ? newName : partKey);
+        }
+        
+        return createNewSchemaVersion(newFields, newPrimaryKeys, newPartitionKeys);
+    }
 }

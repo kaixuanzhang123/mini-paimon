@@ -3,6 +3,7 @@ package com.mini.paimon.flink.catalog;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.exception.CatalogException;
+import com.mini.paimon.index.IndexType;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.table.Table;
 import org.apache.flink.table.catalog.*;
@@ -13,6 +14,7 @@ import org.apache.flink.table.expressions.Expression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -201,18 +203,66 @@ public class FlinkCatalog extends AbstractCatalog {
             Identifier identifier = new Identifier(tablePath.getDatabaseName(), tablePath.getObjectName());
             Schema schema = FlinkSchemaConverter.toSchema(table);
             
-            catalog.createTable(identifier, schema, ignoreIfExists);
+            Map<String, List<IndexType>> indexConfig = parseIndexConfig(table.getOptions());
+            
+            if (indexConfig.isEmpty()) {
+                catalog.createTable(identifier, schema, ignoreIfExists);
+            } else {
+                LOG.info("Creating table {} with index config: {}", tablePath, indexConfig);
+                catalog.createTableWithIndex(identifier, schema, indexConfig, ignoreIfExists);
+            }
         } catch (TableAlreadyExistException | DatabaseNotExistException e) {
             throw e;
         } catch (Exception e) {
             throw new CatalogException("Failed to create table: " + tablePath, e);
         }
     }
+    
+    private Map<String, List<IndexType>> parseIndexConfig(Map<String, String> options) {
+        Map<String, List<IndexType>> indexConfig = new HashMap<>();
+        
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("index.") && key.endsWith(".type")) {
+                String fieldName = key.substring(6, key.length() - 5);
+                String indexTypeName = entry.getValue();
+                
+                try {
+                    IndexType indexType = IndexType.fromName(indexTypeName);
+                    indexConfig.computeIfAbsent(fieldName, k -> new ArrayList<>()).add(indexType);
+                    LOG.debug("Parsed index config: field={}, type={}", fieldName, indexType);
+                } catch (IllegalArgumentException e) {
+                    LOG.warn("Unknown index type: {} for field: {}", indexTypeName, fieldName);
+                }
+            }
+        }
+        
+        return indexConfig;
+    }
 
     @Override
     public void alterTable(ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists) 
             throws TableNotExistException, CatalogException {
-        throw new UnsupportedOperationException("alterTable is not supported");
+        try {
+            if (!tableExists(tablePath)) {
+                if (!ignoreIfNotExists) {
+                    throw new TableNotExistException(getName(), tablePath);
+                }
+                return;
+            }
+            
+            Identifier identifier = new Identifier(tablePath.getDatabaseName(), tablePath.getObjectName());
+            Schema newSchema = FlinkSchemaConverter.toSchema(newTable);
+            
+            catalog.alterTable(identifier, newSchema.getFields(), 
+                              newSchema.getPrimaryKeys(), newSchema.getPartitionKeys());
+            
+            LOG.info("Altered table: {}", tablePath);
+        } catch (TableNotExistException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new CatalogException("Failed to alter table: " + tablePath, e);
+        }
     }
 
     @Override

@@ -11,7 +11,10 @@ public enum IndexType {
     BLOOM_FILTER("bloom_filter", ".bfi"),
     
     /** 最小最大值索引 - 用于范围查询过滤 */
-    MIN_MAX("min_max", ".mmi");
+    MIN_MAX("min_max", ".mmi"),
+    
+    /** 位图索引 - 用于低基数列的行级精确过滤 */
+    BITMAP("bitmap", ".bmi");
     
     private final String name;
     private final String fileSuffix;

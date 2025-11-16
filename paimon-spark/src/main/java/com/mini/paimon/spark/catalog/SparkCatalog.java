@@ -3,6 +3,7 @@ package com.mini.paimon.spark.catalog;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.exception.CatalogException;
+import com.mini.paimon.index.IndexType;
 import com.mini.paimon.metadata.Schema;
 import com.mini.paimon.table.Table;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -92,7 +93,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             Identifier identifier = new Identifier(database, ident.name());
             Schema paimonSchema = SparkSchemaConverter.toSchema(schema, partitions, properties);
             
-            catalog.createTable(identifier, paimonSchema, false);
+            Map<String, List<IndexType>> indexConfig = parseIndexConfig(properties);
+            
+            if (indexConfig.isEmpty()) {
+                catalog.createTable(identifier, paimonSchema, false);
+            } else {
+                LOG.info("Creating table {} with index config: {}", ident, indexConfig);
+                catalog.createTableWithIndex(identifier, paimonSchema, indexConfig, false);
+            }
             
             Table paimonTable = catalog.getTable(identifier);
             return new SparkTable(paimonTable, warehouse);
@@ -104,12 +112,110 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             throw new RuntimeException("Failed to create table: " + ident, e);
         }
     }
+    
+    private Map<String, List<IndexType>> parseIndexConfig(Map<String, String> properties) {
+        Map<String, List<IndexType>> indexConfig = new HashMap<>();
+        
+        if (properties == null) {
+            return indexConfig;
+        }
+        
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("index.") && key.endsWith(".type")) {
+                String fieldName = key.substring(6, key.length() - 5);
+                String indexTypeName = entry.getValue();
+                
+                try {
+                    IndexType indexType = IndexType.fromName(indexTypeName);
+                    indexConfig.computeIfAbsent(fieldName, k -> new ArrayList<>()).add(indexType);
+                    LOG.debug("Parsed index config: field={}, type={}", fieldName, indexType);
+                } catch (IllegalArgumentException e) {
+                    LOG.warn("Unknown index type: {} for field: {}", indexTypeName, fieldName);
+                }
+            }
+        }
+        
+        return indexConfig;
+    }
 
     @Override
     public org.apache.spark.sql.connector.catalog.Table alterTable(
             org.apache.spark.sql.connector.catalog.Identifier ident,
             TableChange... changes) throws NoSuchTableException {
-        throw new UnsupportedOperationException("alterTable is not supported");
+        try {
+            Identifier identifier = new Identifier(
+                ident.namespace()[0], 
+                ident.name()
+            );
+            
+            if (!catalog.tableExists(identifier)) {
+                throw new NoSuchTableException(ident);
+            }
+            
+            Schema currentSchema = catalog.getTableSchema(identifier);
+            java.util.List<com.mini.paimon.metadata.Field> fields = new java.util.ArrayList<>(currentSchema.getFields());
+            
+            for (TableChange change : changes) {
+                if (change instanceof TableChange.AddColumn) {
+                    TableChange.AddColumn addColumn = (TableChange.AddColumn) change;
+                    String[] fieldNames = addColumn.fieldNames();
+                    if (fieldNames.length != 1) {
+                        throw new UnsupportedOperationException("Nested columns are not supported");
+                    }
+                    String fieldName = fieldNames[0];
+                    com.mini.paimon.metadata.DataType dataType = 
+                        SparkSchemaConverter.toDataType(addColumn.dataType());
+                    boolean nullable = addColumn.isNullable();
+                    fields.add(new com.mini.paimon.metadata.Field(fieldName, dataType, nullable));
+                    LOG.info("Adding column: {} {}", fieldName, dataType);
+                    
+                } else if (change instanceof TableChange.DeleteColumn) {
+                    TableChange.DeleteColumn deleteColumn = (TableChange.DeleteColumn) change;
+                    String[] fieldNames = deleteColumn.fieldNames();
+                    if (fieldNames.length != 1) {
+                        throw new UnsupportedOperationException("Nested columns are not supported");
+                    }
+                    String fieldName = fieldNames[0];
+                    fields.removeIf(f -> f.getName().equals(fieldName));
+                    LOG.info("Dropping column: {}", fieldName);
+                    
+                } else if (change instanceof TableChange.RenameColumn) {
+                    TableChange.RenameColumn renameColumn = (TableChange.RenameColumn) change;
+                    String[] fieldNames = renameColumn.fieldNames();
+                    if (fieldNames.length != 1) {
+                        throw new UnsupportedOperationException("Nested columns are not supported");
+                    }
+                    String oldName = fieldNames[0];
+                    String newName = renameColumn.newName();
+                    
+                    for (int i = 0; i < fields.size(); i++) {
+                        com.mini.paimon.metadata.Field field = fields.get(i);
+                        if (field.getName().equals(oldName)) {
+                            fields.set(i, new com.mini.paimon.metadata.Field(
+                                newName, field.getType(), field.isNullable()));
+                            break;
+                        }
+                    }
+                    LOG.info("Renaming column: {} to {}", oldName, newName);
+                    
+                } else {
+                    LOG.warn("Unsupported table change: {}", change.getClass().getSimpleName());
+                }
+            }
+            
+            catalog.alterTable(identifier, fields, 
+                             currentSchema.getPrimaryKeys(), 
+                             currentSchema.getPartitionKeys());
+            
+            Table paimonTable = catalog.getTable(identifier);
+            return new SparkTable(paimonTable, warehouse);
+            
+        } catch (CatalogException.TableNotExistException e) {
+            throw new NoSuchTableException(ident);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to alter table: " + ident, e);
+        }
     }
 
     @Override

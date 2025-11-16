@@ -4,13 +4,12 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.CatalogLoader;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.table.Table;
-import com.mini.paimon.table.TableCommit;
-import com.mini.paimon.table.TableWrite;
+import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.table.*;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,8 +37,25 @@ public class PaimonSinkFunction implements SinkFunction<RowData> {
             open();
         }
 
-        com.mini.paimon.metadata.Row row = FlinkRowConverter.toRow(value, table.schema());
-        tableWrite.write(row);
+        RowKind kind = value.getRowKind();
+        Schema schema = table.schema();
+        
+        switch (kind) {
+            case INSERT:
+            case UPDATE_AFTER:
+                com.mini.paimon.metadata.Row row = FlinkRowConverter.toRow(value, schema);
+                tableWrite.write(row);
+                LOG.debug("Wrote {} row: {}", kind, row);
+                break;
+                
+            case DELETE:
+            case UPDATE_BEFORE:
+                LOG.warn("DELETE and UPDATE_BEFORE operations are not yet fully supported, ignoring");
+                break;
+                
+            default:
+                LOG.warn("Unknown RowKind: {}", kind);
+        }
     }
 
     private void open() throws Exception {
@@ -58,7 +74,7 @@ public class PaimonSinkFunction implements SinkFunction<RowData> {
         table = catalog.getTable(identifier);
         tableWrite = table.newWrite();
 
-        LOG.info("Opened PaimonSink for table {}", tablePath);
+        LOG.info("Opened PaimonSink for table {} with UPDATE/DELETE support", tablePath);
     }
 
     public void finish() throws Exception {

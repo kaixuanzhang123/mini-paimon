@@ -1,6 +1,7 @@
 package com.mini.paimon.index;
 
 import com.mini.paimon.metadata.Row;
+import com.mini.paimon.table.Predicate;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -28,6 +29,16 @@ public interface FileIndex extends Serializable {
     void add(Object value);
     
     /**
+     * 向索引中添加一个值，同时记录行号（用于Bitmap索引）
+     * @param value 值
+     * @param rowNumber 行号
+     */
+    default void addWithRowNumber(Object value, int rowNumber) {
+        // 默认实现：忽略行号，仅调用add
+        add(value);
+    }
+    
+    /**
      * 测试给定值是否可能存在于索引中
      * @param value 要测试的值
      * @return true 表示可能存在（或一定存在），false 表示一定不存在
@@ -41,6 +52,16 @@ public interface FileIndex extends Serializable {
      * @return true 表示可能有交集，false 表示一定无交集
      */
     boolean mightIntersect(Object min, Object max);
+    
+    /**
+     * 根据谓词过滤，返回符合条件的行号位图（仅Bitmap索引支持）
+     * @param predicate 谓词条件
+     * @return 符合条件的行号位图，如果不支持返回null
+     */
+    default SimpleBitmap filter(Predicate predicate) {
+        // 默认实现：不支持
+        return null;
+    }
     
     /**
      * 序列化索引到字节数组

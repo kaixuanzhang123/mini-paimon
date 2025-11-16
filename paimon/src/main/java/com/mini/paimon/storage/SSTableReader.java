@@ -3,6 +3,7 @@ package com.mini.paimon.storage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.hash.BloomFilter;
 import com.google.common.hash.Funnels;
+import com.mini.paimon.index.SimpleBitmap;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import org.slf4j.Logger;
@@ -76,7 +77,20 @@ public class SSTableReader {
      * @throws IOException 读取异常
      */
     public List<Row> scan(String filePath) throws IOException {
-        logger.debug("Scanning all data from SSTable: {}", filePath);
+        return scan(filePath, (SimpleBitmap) null);
+    }
+    
+    /**
+     * 扫描 SSTable 文件中的数据，使用Bitmap过滤
+     * 
+     * @param filePath 文件路径
+     * @param bitmapFilter 行号位图过滤器，null表示不过滤
+     * @return 所有行数据的列表
+     * @throws IOException 读取异常
+     */
+    public List<Row> scan(String filePath, SimpleBitmap bitmapFilter) throws IOException {
+        logger.debug("Scanning data from SSTable: {}, with bitmap filter: {}", 
+                    filePath, bitmapFilter != null);
         
         List<Row> rows = new ArrayList<>();
         
@@ -87,7 +101,11 @@ public class SSTableReader {
             SSTable.Footer footer = readFooter(fileChannel);
             
             // 2. 遍历所有数据块
-            scanAllDataBlocks(fileChannel, footer, rows);
+            if (bitmapFilter != null) {
+                scanAllDataBlocksWithBitmap(fileChannel, footer, rows, bitmapFilter);
+            } else {
+                scanAllDataBlocks(fileChannel, footer, rows);
+            }
         }
         
         return rows;
@@ -499,6 +517,99 @@ public class SSTableReader {
                 } catch (Exception e) {
                     logger.warn("Failed to read data block at position {}: {}", position, e.getMessage());
                     position += 4 + blockSize; // 出错时至少跳过DataBlock
+                }
+            } catch (Exception e) {
+                logger.warn("Error scanning data blocks at position {}: {}", position, e.getMessage());
+                break;
+            }
+        }
+    }
+    
+    /**
+     * 扫描所有数据块并应用Bitmap过滤
+     */
+    private void scanAllDataBlocksWithBitmap(FileChannel fileChannel, SSTable.Footer footer, 
+                                            List<Row> rows, SimpleBitmap bitmapFilter) 
+            throws IOException {
+        // 从第一个数据块开始扫描
+        long position = 0;
+        long dataEndPosition = footer.getBloomFilterOffset() > 0 ? footer.getBloomFilterOffset() : fileChannel.size() - 12;
+        int currentRowNumber = 0;
+        
+        while (position < dataEndPosition) {
+            try {
+                fileChannel.position(position);
+                
+                // 读取数据块大小
+                ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+                int bytesRead = fileChannel.read(sizeBuffer);
+                if (bytesRead < 4) {
+                    break;
+                }
+                
+                sizeBuffer.flip();
+                int blockSize = sizeBuffer.getInt();
+                
+                if (blockSize <= 0 || blockSize > 1024 * 1024) {
+                    position += 4;
+                    continue;
+                }
+                
+                if (position + 4 + blockSize > dataEndPosition) {
+                    break;
+                }
+                
+                // 读取数据块数据
+                ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
+                fileChannel.read(blockBuffer);
+                blockBuffer.flip();
+                
+                byte[] blockBytes = new byte[blockSize];
+                blockBuffer.get(blockBytes);
+                
+                try {
+                    // 读取DataBlock
+                    SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
+                    
+                    // 读取RowIndex
+                    long currentPos = position + 4 + blockSize;
+                    fileChannel.position(currentPos);
+                    
+                    ByteBuffer rowIndexSizeBuffer = ByteBuffer.allocate(4);
+                    int rowIndexBytesRead = fileChannel.read(rowIndexSizeBuffer);
+                    int rowIndexSize = 0;
+                    if (rowIndexBytesRead == 4) {
+                        rowIndexSizeBuffer.flip();
+                        rowIndexSize = rowIndexSizeBuffer.getInt();
+                        
+                        if (rowIndexSize > 0 && rowIndexSize < 1024 * 1024) {
+                            ByteBuffer rowIndexBuffer = ByteBuffer.allocate(rowIndexSize);
+                            fileChannel.read(rowIndexBuffer);
+                            rowIndexBuffer.flip();
+                            
+                            byte[] rowIndexBytes = new byte[rowIndexSize];
+                            rowIndexBuffer.get(rowIndexBytes);
+                            
+                            List<SSTable.RowIndexEntry> rowIndex = objectMapper.readValue(
+                                rowIndexBytes,
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, SSTable.RowIndexEntry.class)
+                            );
+                            
+                            // 只添加位图中标记的行
+                            for (SSTable.RowIndexEntry entry : rowIndex) {
+                                if (bitmapFilter.contains(currentRowNumber)) {
+                                    Row row = dataBlock.getRowByIndex(entry);
+                                    rows.add(row);
+                                }
+                                currentRowNumber++;
+                            }
+                        }
+                    }
+                    // 移动到下一个Block
+                    position += 4 + blockSize + 4 + rowIndexSize;
+                } catch (Exception e) {
+                    logger.warn("Failed to read data block at position {}: {}", position, e.getMessage());
+                    position += 4 + blockSize;
                 }
             } catch (Exception e) {
                 logger.warn("Error scanning data blocks at position {}: {}", position, e.getMessage());

@@ -53,15 +53,20 @@ public class BatchIndexBuilder {
     }
     
     /**
-     * 为所有字段创建默认索引（BloomFilter + MinMax）
+     * 为所有字段创建默认索引（BloomFilter + MinMax + Bitmap）
      */
     public static BatchIndexBuilder createDefault(Schema schema) {
         Map<String, List<IndexType>> indexConfig = new HashMap<>();
         
-        // 为所有非主键字段创建索引
+        // 为所有字段创建索引（包括Bitmap索引用于低基数列）
         for (int i = 0; i < schema.getFields().size(); i++) {
             String fieldName = schema.getFields().get(i).getName();
-            List<IndexType> types = Arrays.asList(IndexType.BLOOM_FILTER, IndexType.MIN_MAX);
+            // 创建三种索引：BloomFilter用于高基数，MinMax用于范围，Bitmap用于低基数
+            List<IndexType> types = Arrays.asList(
+                IndexType.BLOOM_FILTER, 
+                IndexType.MIN_MAX,
+                IndexType.BITMAP
+            );
             indexConfig.put(fieldName, types);
         }
         
@@ -92,6 +97,13 @@ public class BatchIndexBuilder {
      * 向索引中添加一行数据
      */
     public void addRow(RowKey key, Row row) {
+        addRow(key, row, -1);
+    }
+    
+    /**
+     * 向索引中添加一行数据（带行号，用于Bitmap索引）
+     */
+    public void addRow(RowKey key, Row row, int rowNumber) {
         if (row == null) {
             return;
         }
@@ -109,7 +121,13 @@ public class BatchIndexBuilder {
                 // 向该字段的所有索引添加值
                 for (FileIndex index : entry.getValue()) {
                     try {
-                        index.add(value);
+                        if (rowNumber >= 0) {
+                            // 如果有行号，使用addWithRowNumber
+                            index.addWithRowNumber(value, rowNumber);
+                        } else {
+                            // 否则使用普通add
+                            index.add(value);
+                        }
                     } catch (Exception e) {
                         logger.error("Failed to add value to index: field={}, indexType={}", 
                                    fieldName, index.getIndexType(), e);
@@ -123,8 +141,9 @@ public class BatchIndexBuilder {
      * 批量添加多行数据
      */
     public void addRows(Map<RowKey, Row> entries) {
+        int rowNumber = 0;
         for (Map.Entry<RowKey, Row> entry : entries.entrySet()) {
-            addRow(entry.getKey(), entry.getValue());
+            addRow(entry.getKey(), entry.getValue(), rowNumber++);
         }
     }
     
@@ -176,6 +195,10 @@ public class BatchIndexBuilder {
                     MinMaxIndex mmi = (MinMaxIndex) index;
                     stats.put(key, String.format("min=%s, max=%s, elements=%d", 
                              mmi.getMinValue(), mmi.getMaxValue(), mmi.getElementCount()));
+                } else if (index instanceof BitmapIndex) {
+                    BitmapIndex bmi = (BitmapIndex) index;
+                    stats.put(key, String.format("rows=%d, distinctValues=%d", 
+                             bmi.getRowCount(), bmi.getDistinctValueCount()));
                 }
             }
         }
