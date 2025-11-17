@@ -79,12 +79,12 @@ public class DataTableScan {
         }
         
         logger.debug("Scanning snapshot {} for table {}/{}", 
-                    snapshot.getSnapshotId(), database, table);
+                    snapshot.getId(), database, table);
         
         // 2. 从快照中读取 ManifestList
         // 需要读取 base + delta 来获取所有数据文件
         List<DataFileMeta> dataFileMetas = new ArrayList<>();
-        long snapshotIdValue = snapshot.getSnapshotId();
+        long snapshotIdValue = snapshot.getId();
         
         // 2.1 读取 base manifest list (如果存在)
         String baseManifestListName = snapshot.getBaseManifestList();
@@ -145,7 +145,7 @@ public class DataTableScan {
         
         // 如果既没有 base 也没有 delta，抛出异常
         if (baseManifestListName == null && deltaManifestListName == null) {
-            throw new IOException("No manifest list found in snapshot " + snapshot.getSnapshotId());
+            throw new IOException("No manifest list found in snapshot " + snapshot.getId());
         }
         
         // 3. 使用索引过滤数据文件
@@ -161,7 +161,7 @@ public class DataTableScan {
         }
         
         logger.info("Scan plan generated: {} data files from snapshot {}", 
-                   dataFiles.size(), snapshot.getSnapshotId());
+                   dataFiles.size(), snapshot.getId());
         
         return new Plan(snapshot, dataFiles);
     }

@@ -46,11 +46,14 @@ public class LSMTree {
     private final List<Compactor.LeveledSSTable> sstables;
     private final AtomicLong walSequence;
     
+    /** 索引配置 */
+    private final Map<String, List<com.mini.paimon.index.IndexType>> indexConfig;
+    
     // 跟踪本次写入会话中新生成的 SSTable 文件元信息
     private final List<com.mini.paimon.manifest.DataFileMeta> pendingFiles = new ArrayList<>();
     
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table) throws IOException {
-        this(schema, pathFactory, database, table, true, 0L);
+        this(schema, pathFactory, database, table, true, 0L, null);
     }
     
     /**
@@ -59,7 +62,7 @@ public class LSMTree {
      */
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
                    boolean loadExistingFiles) throws IOException {
-        this(schema, pathFactory, database, table, loadExistingFiles, 0L);
+        this(schema, pathFactory, database, table, loadExistingFiles, 0L, null);
     }
     
     /**
@@ -69,22 +72,34 @@ public class LSMTree {
      */
     public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
                    boolean loadExistingFiles, long writerId) throws IOException {
+        this(schema, pathFactory, database, table, loadExistingFiles, writerId, null);
+    }
+    
+    /**
+     * LSMTree 构造函数
+     * @param loadExistingFiles 是否加载现有的 SSTable 文件（分区表的 Bucket 应该设为 false）
+     * @param writerId 唯一的 writer 标识符，用于分布式环境中避免 WAL 文件冲突
+     * @param indexConfig 索引配置
+     */
+    public LSMTree(Schema schema, PathFactory pathFactory, String database, String table, 
+                   boolean loadExistingFiles, long writerId, Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
+        this.indexConfig = indexConfig != null ? indexConfig : new java.util.HashMap<>();
         // 关键修复：使用 writerId + 当前时间戳作为初始 sequence，确保不同 writer 产生唯一的文件名
         // writerId 左移32位，加上时间戳的低32位，保证全局唯一性
         long initialSequence = (writerId << 32) | (System.currentTimeMillis() & 0xFFFFFFFFL);
         this.sequenceGenerator = new AtomicLong(initialSequence);
         this.walSequence = new AtomicLong(0);
         this.sstReader = new SSTableReader();
-        this.sstWriter = new SSTableWriter();
+        this.sstWriter = new SSTableWriter(pathFactory, true, this.indexConfig);
         this.snapshotManager = new SnapshotManager(pathFactory, database, table);
         this.objectMapper = new ObjectMapper();
         this.sstables = new ArrayList<>();
-        this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
-        this.asyncCompactor = new AsyncCompactor(schema, pathFactory, database, table, sequenceGenerator);
+        this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator, this.indexConfig);
+        this.asyncCompactor = new AsyncCompactor(schema, pathFactory, database, table, sequenceGenerator, this.indexConfig);
         
         pathFactory.createTableDirectories(database, table);
         
@@ -372,12 +387,15 @@ public class LSMTree {
         // 生成 SSTable 文件路径
         String sstPath = pathFactory.getSSTPath(database, table, 0, immutableMemTable.getSequenceNumber()).toString();
         
-        // 刷写到磁盘，直接返回 DataFileMeta（包含统计信息）
+        // 刷写到磁盘，直接返回 DataFileMeta（包含统计信息和索引）
         com.mini.paimon.manifest.DataFileMeta fileMeta = sstWriter.flush(
             immutableMemTable, 
             sstPath, 
             schema.getSchemaId(), 
-            0  // level
+            0,  // level
+            schema,
+            database,
+            table
         );
         
         logger.info("Flushed memtable to SSTable: {}, minKey={}, maxKey={}", 
@@ -486,24 +504,6 @@ public class LSMTree {
     }
 
     /**
-     * 从 SSTable 中获取数据（已废弃，由get方法处理）
-     */
-    @Deprecated
-    private Row getSSTableRow(RowKey key) throws IOException {
-        for (Compactor.LeveledSSTable sst : sstables) {
-            try {
-                Row row = sstReader.get(sst.getPath(), key);
-                if (row != null) {
-                    return row;
-                }
-            } catch (Exception e) {
-                logger.warn("Error reading SSTable {}: {}", sst.getPath(), e.getMessage());
-            }
-        }
-        return null;
-    }
-
-    /**
      * 关闭 LSM Tree，刷写所有数据
      * 不再自动创建快照，由两阶段提交统一处理
      */
@@ -525,7 +525,10 @@ public class LSMTree {
                 activeMemTable, 
                 sstPath, 
                 schema.getSchemaId(), 
-                0
+                0,
+                schema,
+                database,
+                table
             );
             
             logger.info("Flushed active memtable: {}, minKey={}, maxKey={}",
@@ -562,7 +565,10 @@ public class LSMTree {
                 immutableMemTable, 
                 sstPath, 
                 schema.getSchemaId(), 
-                0
+                0,
+                schema,
+                database,
+                table
             );
             
             logger.info("Flushed immutable memtable: {}, minKey={}, maxKey={}",

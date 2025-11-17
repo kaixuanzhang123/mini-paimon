@@ -39,19 +39,6 @@ public class ManifestList {
     public void addManifestFile(ManifestFileMeta manifestFileMeta) {
         this.manifestFiles.add(Objects.requireNonNull(manifestFileMeta, "Manifest file meta cannot be null"));
     }
-    
-    /**
-     * 添加 Manifest 文件路径（兼容旧接口）
-     * @deprecated 使用 addManifestFile(ManifestFileMeta) 替代
-     */
-    @Deprecated
-    public void addManifestFile(String manifestFile) {
-        // 为了向后兼容，创建一个简单的 ManifestFileMeta
-        ManifestFileMeta meta = new ManifestFileMeta(
-            manifestFile, 0, 0, 0, 0, null, null
-        );
-        this.manifestFiles.add(meta);
-    }
 
     /**
      * 获取所有 Manifest 文件元信息

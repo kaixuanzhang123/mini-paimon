@@ -49,14 +49,22 @@ public class SSTableWriter {
     /** 是否启用索引 */
     private final boolean indexEnabled;
     
+    /** 索引配置 */
+    private final Map<String, List<com.mini.paimon.index.IndexType>> indexConfig;
+    
     public SSTableWriter() {
-        this(null, true);
+        this(null, true, null);
     }
     
     public SSTableWriter(PathFactory pathFactory, boolean indexEnabled) {
+        this(pathFactory, indexEnabled, null);
+    }
+    
+    public SSTableWriter(PathFactory pathFactory, boolean indexEnabled, Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) {
         this.objectMapper = new ObjectMapper();
         this.indexFileManager = pathFactory != null ? new IndexFileManager(pathFactory) : null;
         this.indexEnabled = indexEnabled;
+        this.indexConfig = indexConfig;
     }
 
     /**
@@ -446,8 +454,16 @@ public class SSTableWriter {
         List<IndexMeta> indexMetaList = new ArrayList<>();
         
         try {
-            // 创建批量索引构建器（为所有字段创建默认索引）
-            BatchIndexBuilder indexBuilder = BatchIndexBuilder.createDefault(schema);
+            // 根据 indexConfig 创建索引构建器
+            BatchIndexBuilder indexBuilder;
+            if (indexConfig != null && !indexConfig.isEmpty()) {
+                logger.info("Building indexes with custom config: {}", indexConfig);
+                indexBuilder = new BatchIndexBuilder(schema, indexConfig);
+            } else {
+                // 如果没有配置，使用默认索引
+                logger.debug("Building indexes with default config");
+                indexBuilder = BatchIndexBuilder.createDefault(schema);
+            }
             
             // 添加所有行到索引
             indexBuilder.addRows(entries);

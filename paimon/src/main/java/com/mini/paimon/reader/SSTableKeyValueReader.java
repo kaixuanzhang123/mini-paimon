@@ -110,16 +110,12 @@ public class SSTableKeyValueReader implements KeyValueFileReader {
             return null;
         }
         
-        // 5. 读取 DataBlock 的 valuesData
-        byte[] valuesData = readValuesData(
-            targetBlock.getBlockOffset(), 
-            targetBlock.getBlockSize()
-        );
+        // 5. 优化：对于点查询，直接读取目标行的字节范围
+        //    这避免了读取整个 DataBlock，减少 I/O
+        //    权衡：失去 BlockCache 的优势，但对于随机点查询更高效
+        Row row = extractRowDirect(targetBlock.getBlockOffset(), targetEntry);
         
-        // 6. 提取目标行
-        Row row = extractRow(valuesData, targetEntry);
-        
-        // 7. 应用过滤和投影
+        // 6. 应用过滤和投影
         if (row != null) {
             if (predicate != null && !predicate.test(row, schema)) {
                 return null;
@@ -395,6 +391,50 @@ public class SSTableKeyValueReader implements KeyValueFileReader {
     private Row extractRow(byte[] valuesData, SSTable.RowIndexEntry entry) throws IOException {
         int offset = entry.getValueOffset();
         int length = entry.getValueLength();
+        
+        if (offset < 0 || length <= 0 || offset + length > valuesData.length) {
+            throw new IOException("Invalid row index: offset=" + offset + 
+                ", length=" + length + ", valuesDataSize=" + valuesData.length);
+        }
+        
+        byte[] rowBytes = new byte[length];
+        System.arraycopy(valuesData, offset, rowBytes, 0, length);
+        
+        return objectMapper.readValue(rowBytes, Row.class);
+    }
+    
+    /**
+     * 直接从文件读取单行数据（点查询优化）
+     * 不读取整个 DataBlock，只读取目标行的字节范围
+     * 
+     * @param blockOffset DataBlock 在文件中的偏移量
+     * @param rowEntry 行索引条目
+     * @return 行数据
+     * @throws IOException 读取异常
+     */
+    private Row extractRowDirect(long blockOffset, SSTable.RowIndexEntry rowEntry) throws IOException {
+        // 1. 先读取 DataBlock 的头部以获取实际的 valuesData 位置
+        fileChannel.position(blockOffset);
+        
+        ByteBuffer sizeBuffer = ByteBuffer.allocate(4);
+        fileChannel.read(sizeBuffer);
+        sizeBuffer.flip();
+        int blockSize = sizeBuffer.getInt();
+        
+        // 2. 读取 DataBlock 结构
+        ByteBuffer blockBuffer = ByteBuffer.allocate(blockSize);
+        fileChannel.read(blockBuffer);
+        blockBuffer.flip();
+        
+        byte[] blockBytes = new byte[blockSize];
+        blockBuffer.get(blockBytes);
+        
+        SSTable.DataBlock dataBlock = objectMapper.readValue(blockBytes, SSTable.DataBlock.class);
+        
+        // 3. 从 valuesData 中提取目标行
+        byte[] valuesData = dataBlock.getValuesData();
+        int offset = rowEntry.getValueOffset();
+        int length = rowEntry.getValueLength();
         
         if (offset < 0 || length <= 0 || offset + length > valuesData.length) {
             throw new IOException("Invalid row index: offset=" + offset + 

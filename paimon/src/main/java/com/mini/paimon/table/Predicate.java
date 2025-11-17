@@ -4,14 +4,15 @@ import com.mini.paimon.metadata.Field;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.Schema;
 
-import java.util.ArrayList;
+import java.io.Serializable;
 import java.util.List;
 
 /**
  * Predicate
  * 谓词过滤条件，用于 WHERE 子句
  */
-public abstract class Predicate {
+public abstract class Predicate implements Serializable {
+    private static final long serialVersionUID = 1L;
     
     /**
      * 测试行是否满足条件
@@ -35,7 +36,7 @@ public abstract class Predicate {
     /**
      * 比较操作符
      */
-    public enum CompareOp {
+    public enum CompareOp implements Serializable {
         EQ,  // =
         NE,  // !=
         GT,  // >
@@ -48,6 +49,8 @@ public abstract class Predicate {
      * 字段比较谓词
      */
     public static class FieldPredicate extends Predicate {
+        private static final long serialVersionUID = 1L;
+        
         private final String fieldName;
         private final CompareOp op;
         private final Object value;
@@ -87,6 +90,11 @@ public abstract class Predicate {
             return compare(fieldValue, value, op);
         }
         
+        @Override
+        public String toString() {
+            return fieldName + " " + op + " " + value;
+        }
+        
         private int findFieldIndex(Schema schema, String fieldName) {
             List<Field> fields = schema.getFields();
             for (int i = 0; i < fields.size(); i++) {
@@ -121,6 +129,8 @@ public abstract class Predicate {
      * AND 谓词
      */
     public static class AndPredicate extends Predicate {
+        private static final long serialVersionUID = 1L;
+        
         private final Predicate left;
         private final Predicate right;
         
@@ -141,12 +151,19 @@ public abstract class Predicate {
         public boolean test(Row row, Schema schema) {
             return left.test(row, schema) && right.test(row, schema);
         }
+        
+        @Override
+        public String toString() {
+            return "(" + left + " AND " + right + ")";
+        }
     }
     
     /**
      * OR 谓词
      */
     public static class OrPredicate extends Predicate {
+        private static final long serialVersionUID = 1L;
+        
         private final Predicate left;
         private final Predicate right;
         
@@ -166,6 +183,11 @@ public abstract class Predicate {
         @Override
         public boolean test(Row row, Schema schema) {
             return left.test(row, schema) || right.test(row, schema);
+        }
+        
+        @Override
+        public String toString() {
+            return "(" + left + " OR " + right + ")";
         }
     }
     

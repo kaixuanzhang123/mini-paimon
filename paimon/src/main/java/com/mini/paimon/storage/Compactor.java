@@ -1,16 +1,18 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -33,14 +35,23 @@ public class Compactor {
     private final SSTableWriter writer;
     private final AtomicLong sequenceGenerator;
     
+    /** 索引配置 */
+    private final Map<String, List<com.mini.paimon.index.IndexType>> indexConfig;
+    
     public Compactor(Schema schema, PathFactory pathFactory, String database, String table,
                     AtomicLong sequenceGenerator) {
+        this(schema, pathFactory, database, table, sequenceGenerator, null);
+    }
+    
+    public Compactor(Schema schema, PathFactory pathFactory, String database, String table,
+                    AtomicLong sequenceGenerator, Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
         this.reader = new SSTableReader();
-        this.writer = new SSTableWriter();
+        this.indexConfig = indexConfig != null ? indexConfig : new HashMap<>();
+        this.writer = new SSTableWriter(pathFactory, true, this.indexConfig);
         this.sequenceGenerator = sequenceGenerator;
     }
     
@@ -233,12 +244,15 @@ public class Compactor {
     private LeveledSSTable flushToLevel(MemTable memTable, int level) throws IOException {
         String path = pathFactory.getSSTPath(database, table, level, 
                                             memTable.getSequenceNumber()).toString();
-        // 使用新的 flush 方法，直接返回 DataFileMeta
+        // 使用新的 flush 方法，直接返回 DataFileMeta（包含索引）
         com.mini.paimon.manifest.DataFileMeta fileMeta = writer.flush(
             memTable, 
             path, 
             schema.getSchemaId(), 
-            level
+            level,
+            schema,
+            database,
+            table
         );
         
         return new LeveledSSTable(

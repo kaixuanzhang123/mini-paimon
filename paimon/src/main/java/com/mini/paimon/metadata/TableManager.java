@@ -85,10 +85,16 @@ public class TableManager {
         // 创建初始 Schema 版本
         Schema initialSchema = schemaManager.createNewSchemaVersion(fields, primaryKeys, partitionKeys);
         
+        // 根据 Schema 确定表类型
+        TableType tableType = TableType.fromSchema(initialSchema);
+        
         // 创建表元数据（包含索引配置）
         TableMetadata tableMetadata = TableMetadata.newBuilder(tableName, database, initialSchema.getSchemaId())
+                .tableType(tableType)
                 .indexConfig(indexConfig)
                 .build();
+        
+        logger.info("Table type determined: {}", tableType);
         
         // 持久化 metadata 文件（索引配置必须持久化）
         tableMetadata.persist(pathFactory);

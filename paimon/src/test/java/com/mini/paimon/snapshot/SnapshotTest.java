@@ -79,10 +79,11 @@ class SnapshotTest {
         
         assertNotNull(snapshot);
         // 注意：第一个快照的ID是1，不是0
-        assertEquals(1, snapshot.getSnapshotId());
+        assertEquals(1, snapshot.getId());
         assertEquals(0, snapshot.getSchemaId());
-        assertNotNull(snapshot.getCommitTime());
-        assertNotNull(snapshot.getManifestList());
+        assertNotNull(snapshot.getTimeMillis());
+        assertTrue(snapshot.getTimeMillis() > 0);
+        assertNotNull(snapshot.getBaseManifestList());
         
         // 验证文件已创建
         Path snapshotPath = pathFactory.getSnapshotPath("test_db", "test_table", 1);
@@ -127,7 +128,7 @@ class SnapshotTest {
         assertNotNull(loadedSnapshot);
         assertEquals(originalSnapshot, loadedSnapshot);
         // 注意：第一个快照的ID是1，不是0
-        assertEquals(1, loadedSnapshot.getSnapshotId());
+        assertEquals(1, loadedSnapshot.getId());
         assertEquals(0, loadedSnapshot.getSchemaId());
     }
 
@@ -181,7 +182,7 @@ class SnapshotTest {
         
         assertNotNull(latestSnapshot);
         // 注意：第二个快照的ID是2，不是1
-        assertEquals(2, latestSnapshot.getSnapshotId());
+        assertEquals(2, latestSnapshot.getId());
         assertEquals(snapshot2, latestSnapshot);
     }
 

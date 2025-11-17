@@ -1,5 +1,6 @@
 package com.mini.paimon.reader;
 
+import com.mini.paimon.index.SimpleBitmap;
 import com.mini.paimon.metadata.Row;
 import com.mini.paimon.metadata.RowKey;
 import com.mini.paimon.metadata.Schema;
@@ -18,6 +19,8 @@ import java.util.List;
  * 
  * 为 CSV 文件提供 KeyValueFileReader 接口实现
  * 注意: CSV 文件是 Append-Only 的，不支持基于 Key 的查询
+ * 
+ * 支持 Bitmap 索引行级过滤
  */
 public class CsvKeyValueReader implements KeyValueFileReader {
     
@@ -25,10 +28,19 @@ public class CsvKeyValueReader implements KeyValueFileReader {
     private final Schema schema;
     private Predicate predicate;
     private Projection projection;
+    private SimpleBitmap bitmapFilter;
     
     public CsvKeyValueReader(String filePath, Schema schema) {
         this.filePath = filePath;
         this.schema = schema;
+    }
+    
+    /**
+     * 设置 Bitmap 过滤器（用于行级过滤）
+     */
+    public CsvKeyValueReader withBitmapFilter(SimpleBitmap bitmapFilter) {
+        this.bitmapFilter = bitmapFilter;
+        return this;
     }
     
     @Override
@@ -70,12 +82,20 @@ public class CsvKeyValueReader implements KeyValueFileReader {
         // 需要全表扫描并过滤
         
         List<Row> rows = new ArrayList<>();
+        int rowNumber = 0;
         
         try (CsvReader reader = new CsvReader(schema, Paths.get(filePath))) {
             Row row;
             while ((row = reader.readRow()) != null) {
-                // 应用过滤条件
+                // 应用 Bitmap 索引过滤（行级精确过滤）
+                if (bitmapFilter != null && !bitmapFilter.contains(rowNumber)) {
+                    rowNumber++;
+                    continue;
+                }
+                
+                // 应用谓词过滤条件
                 if (predicate != null && !predicate.test(row, schema)) {
+                    rowNumber++;
                     continue;
                 }
                 
@@ -84,10 +104,12 @@ public class CsvKeyValueReader implements KeyValueFileReader {
                     RowKey rowKey = row.extractKey(schema);
                     
                     if (startKey != null && rowKey.compareTo(startKey) < 0) {
+                        rowNumber++;
                         continue;
                     }
                     
                     if (endKey != null && rowKey.compareTo(endKey) > 0) {
+                        rowNumber++;
                         continue;
                     }
                 }
@@ -95,6 +117,7 @@ public class CsvKeyValueReader implements KeyValueFileReader {
                 // 应用投影
                 Row projectedRow = applyProjection(row);
                 rows.add(projectedRow);
+                rowNumber++;
             }
         }
         
@@ -104,18 +127,27 @@ public class CsvKeyValueReader implements KeyValueFileReader {
     @Override
     public RecordReader<Row> readAll() throws IOException {
         List<Row> rows = new ArrayList<>();
+        int rowNumber = 0;
         
         try (CsvReader reader = new CsvReader(schema, Paths.get(filePath))) {
             Row row;
             while ((row = reader.readRow()) != null) {
-                // 应用过滤条件
+                // 应用 Bitmap 索引过滤（行级精确过滤）
+                if (bitmapFilter != null && !bitmapFilter.contains(rowNumber)) {
+                    rowNumber++;
+                    continue;
+                }
+                
+                // 应用谓词过滤条件
                 if (predicate != null && !predicate.test(row, schema)) {
+                    rowNumber++;
                     continue;
                 }
                 
                 // 应用投影
                 Row projectedRow = applyProjection(row);
                 rows.add(projectedRow);
+                rowNumber++;
             }
         }
         

@@ -78,6 +78,10 @@ public class PaimonSource extends RichSourceFunction<RowData> implements ResultT
         LOG.info("Scan plan generated with {} files", plan.files().size());
         
         TableRead tableRead = table.newRead();
+        if (predicate != null) {
+            LOG.info("Applying filter predicate to TableRead: {}", predicate);
+            tableRead = tableRead.withFilter(predicate);
+        }
         List<Row> rows = tableRead.read(plan);
         
         LOG.info("Read {} rows from table", rows.size());

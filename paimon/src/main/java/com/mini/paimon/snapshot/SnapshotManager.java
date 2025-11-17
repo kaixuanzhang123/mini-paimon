@@ -173,7 +173,7 @@ public class SnapshotManager {
             .build();
         
         // 6. 持久化快照
-        snapshot.persist(pathFactory, database, table);
+        snapshot.writeToFile(pathFactory, database, table);
         
         // 7. 更新 LATEST 指针
         Snapshot.updateLatestSnapshot(pathFactory, database, table, snapshotId);

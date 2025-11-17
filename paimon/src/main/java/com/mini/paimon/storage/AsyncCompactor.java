@@ -40,7 +40,14 @@ public class AsyncCompactor {
     public AsyncCompactor(Schema schema, PathFactory pathFactory, 
                          String database, String table,
                          AtomicLong sequenceGenerator) {
-        this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator);
+        this(schema, pathFactory, database, table, sequenceGenerator, null);
+    }
+    
+    public AsyncCompactor(Schema schema, PathFactory pathFactory, 
+                         String database, String table,
+                         AtomicLong sequenceGenerator,
+                         java.util.Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) {
+        this.compactor = new Compactor(schema, pathFactory, database, table, sequenceGenerator, indexConfig);
         
         // 创建专用线程池（核心线程数=1，避免并发 Compaction 冲突）
         this.executor = new ThreadPoolExecutor(

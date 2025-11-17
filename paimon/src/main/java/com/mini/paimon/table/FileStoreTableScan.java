@@ -134,7 +134,7 @@ public class FileStoreTableScan implements TableScan {
         }
         
         logger.debug("Scanned snapshot {} with {} files", 
-            snapshot.getSnapshotId(), files.size());
+            snapshot.getId(), files.size());
         
         return new PlanImpl(snapshot, files);
     }

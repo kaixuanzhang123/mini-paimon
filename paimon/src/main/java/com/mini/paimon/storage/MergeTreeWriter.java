@@ -38,17 +38,27 @@ public class MergeTreeWriter implements RecordWriter {
             String database,
             String tableName,
             long writerId) throws IOException {
+        this(schema, pathFactory, database, tableName, writerId, null);
+    }
+    
+    public MergeTreeWriter(
+            Schema schema,
+            PathFactory pathFactory,
+            String database,
+            String tableName,
+            long writerId,
+            java.util.Map<String, List<com.mini.paimon.index.IndexType>> indexConfig) throws IOException {
         this.schema = schema;
         this.pathFactory = pathFactory;
         this.database = database;
         this.tableName = tableName;
         this.writerId = writerId;
         
-        // 创建 LSM Tree (主键表使用 LSM Tree)
-        this.lsmTree = new LSMTree(schema, pathFactory, database, tableName, true, writerId);
+        // 创建 LSM Tree (主键表使用 LSM Tree，支持索引)
+        this.lsmTree = new LSMTree(schema, pathFactory, database, tableName, true, writerId, indexConfig);
         
-        logger.info("Created MergeTreeWriter for table {}.{} with writerId={}", 
-            database, tableName, writerId);
+        logger.info("Created MergeTreeWriter for table {}.{} with writerId={}, indexConfig={}", 
+            database, tableName, writerId, indexConfig);
     }
     
     @Override

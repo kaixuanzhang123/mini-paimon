@@ -14,17 +14,24 @@ public class FlinkFilterConverter {
     
     public static Predicate convert(List<ResolvedExpression> filters, ResolvedSchema schema) {
         if (filters == null || filters.isEmpty()) {
+            LOG.info("No filters to convert");
             return null;
         }
         
+        LOG.info("Converting {} filter expressions to Paimon predicates", filters.size());
         Predicate result = null;
         for (ResolvedExpression filter : filters) {
+            LOG.info("Processing filter expression: {}", filter);
             Predicate predicate = convertExpression(filter, schema);
             if (predicate != null) {
+                LOG.info("Converted to predicate: {}", predicate);
                 result = result == null ? predicate : result.and(predicate);
+            } else {
+                LOG.warn("Failed to convert filter expression: {}", filter);
             }
         }
         
+        LOG.info("Final combined predicate: {}", result);
         return result;
     }
     
@@ -41,6 +48,8 @@ public class FlinkFilterConverter {
     private static Predicate convertCallExpression(CallExpression call, ResolvedSchema schema) {
         String functionName = call.getFunctionName();
         List<ResolvedExpression> children = call.getResolvedChildren();
+        
+        LOG.info("Converting call expression: function={}, children={}", functionName, children.size());
         
         switch (functionName) {
             case "equals":
@@ -68,7 +77,7 @@ public class FlinkFilterConverter {
             case "OR":
                 return convertOr(children, schema);
             default:
-                LOG.debug("Unsupported function: {}", functionName);
+                LOG.warn("Unsupported function: {}", functionName);
                 return null;
         }
     }
@@ -77,6 +86,7 @@ public class FlinkFilterConverter {
                                                Predicate.CompareOp op, 
                                                ResolvedSchema schema) {
         if (children.size() != 2) {
+            LOG.warn("Comparison requires exactly 2 operands, got {}", children.size());
             return null;
         }
         
@@ -86,22 +96,33 @@ public class FlinkFilterConverter {
         ResolvedExpression left = children.get(0);
         ResolvedExpression right = children.get(1);
         
+        LOG.info("Comparison operands: left={}, right={}", left.getClass().getSimpleName(), right.getClass().getSimpleName());
+        
         if (left instanceof FieldReferenceExpression && right instanceof ValueLiteralExpression) {
             fieldName = ((FieldReferenceExpression) left).getName();
             value = extractLiteralValue((ValueLiteralExpression) right);
+            LOG.info("Extracted: field={}, value={}, op={}", fieldName, value, op);
         } else if (right instanceof FieldReferenceExpression && left instanceof ValueLiteralExpression) {
             fieldName = ((FieldReferenceExpression) right).getName();
             value = extractLiteralValue((ValueLiteralExpression) left);
             op = reverseOp(op);
+            LOG.info("Extracted (reversed): field={}, value={}, op={}", fieldName, value, op);
         } else {
-            LOG.debug("Unsupported comparison operands");
+            LOG.warn("Unsupported comparison operands: left={}, right={}", 
+                left.getClass().getName(), right.getClass().getName());
             return null;
         }
         
-        if (fieldName == null || value == null) {
+        if (fieldName == null) {
+            LOG.warn("Field name is null");
+            return null;
+        }
+        if (value == null) {
+            LOG.warn("Value is null for field {}", fieldName);
             return null;
         }
         
+        LOG.info("Created FieldPredicate: {} {} {}", fieldName, op, value);
         return new Predicate.FieldPredicate(fieldName, op, value);
     }
     

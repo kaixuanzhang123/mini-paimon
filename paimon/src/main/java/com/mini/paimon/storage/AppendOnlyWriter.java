@@ -152,7 +152,13 @@ public class AppendOnlyWriter implements RecordWriter {
         // 构建索引
         List<IndexMeta> indexMetaList = new ArrayList<>();
         if (!indexConfig.isEmpty() && indexFileManager != null && !currentFileRows.isEmpty()) {
+            logger.info("Building indexes for file {}, rows: {}, indexConfig: {}", 
+                fileName, currentFileRows.size(), indexConfig);
             indexMetaList = buildAndSaveIndexes(currentFileRows, fileName);
+            logger.info("Built {} indexes for file {}", indexMetaList.size(), fileName);
+        } else {
+            logger.debug("Skipping index building: indexConfig.isEmpty()={}, indexFileManager==null={}, currentFileRows.isEmpty()={}", 
+                indexConfig.isEmpty(), indexFileManager == null, currentFileRows.isEmpty());
         }
         
         // 创建文件元信息
@@ -236,27 +242,39 @@ public class AppendOnlyWriter implements RecordWriter {
         List<IndexMeta> indexMetaList = new ArrayList<>();
         
         try {
+            logger.info("Starting index building for file {}, {} rows, config: {}", 
+                dataFileName, rows.size(), indexConfig);
+            
             // 创建批量索引构建器
             BatchIndexBuilder indexBuilder = new BatchIndexBuilder(schema, indexConfig);
+            logger.info("Created BatchIndexBuilder");
             
             // 添加所有行到索引（AppendOnly表没有RowKey，使用null）
             for (Row row : rows) {
                 indexBuilder.addRow(null, row);
             }
+            logger.info("Added {} rows to index builder", rows.size());
             
             // 保存所有索引
             Map<String, List<FileIndex>> indexes = indexBuilder.getIndexes();
+            logger.info("Got {} field indexes", indexes.size());
+            
             for (Map.Entry<String, List<FileIndex>> entry : indexes.entrySet()) {
-                for (FileIndex index : entry.getValue()) {
+                String fieldName = entry.getKey();
+                List<FileIndex> fieldIndexes = entry.getValue();
+                logger.info("Saving indexes for field {}: {} indexes", fieldName, fieldIndexes.size());
+                
+                for (FileIndex index : fieldIndexes) {
                     IndexMeta meta = indexFileManager.saveIndex(index, database, tableName, dataFileName);
                     indexMetaList.add(meta);
+                    logger.info("Saved index: type={}, file={}", index.getIndexType(), meta.getIndexFilePath());
                 }
             }
             
             logger.info("Built and saved {} indexes for file {}", indexMetaList.size(), dataFileName);
             
         } catch (Exception e) {
-            logger.error("Failed to build indexes for file {}", dataFileName, e);
+            logger.error("Failed to build indexes for file " + dataFileName, e);
             // 索引构建失败不影响数据写入
         }
         

@@ -92,12 +92,6 @@ public class FileStoreTable implements Table {
         );
     }
 
-    public TableRead newSimpleRead() {
-        // 使用 FileStoreTableRead 以支持分区过滤、Manifest缓存、并行读取等优化特性
-        return new SimpleTableRead(schema,
-                pathFactory,
-                identifier);
-    }
 
     @Override
     public TableWrite newWrite() {

@@ -113,32 +113,12 @@ public class Snapshot {
         this.totalRecordCount = totalRecordCount;
         this.deltaRecordCount = deltaRecordCount;
     }
-    
-    /**
-     * 简化构造函数（用于简单场景）
-     * 
-     * @deprecated 建议使用 Builder 模式
-     */
-    @Deprecated
-    public Snapshot(long id, int schemaId, String manifestList) {
-        this(3, id, schemaId, manifestList, manifestList, 
-             "system", id, CommitKind.APPEND, 
-             System.currentTimeMillis(), 0, 0);
-    }
 
     public int getVersion() {
         return version;
     }
     
     public long getId() {
-        return id;
-    }
-    
-    /**
-     * @deprecated 使用 getId()
-     */
-    @Deprecated
-    public long getSnapshotId() {
         return id;
     }
 
@@ -152,14 +132,6 @@ public class Snapshot {
     
     public String getDeltaManifestList() {
         return deltaManifestList;
-    }
-    
-    /**
-     * @deprecated 使用 getBaseManifestList() 或 getDeltaManifestList()
-     */
-    @Deprecated
-    public String getManifestList() {
-        return baseManifestList;
     }
     
     public String getCommitUser() {
@@ -178,14 +150,6 @@ public class Snapshot {
         return timeMillis;
     }
     
-    /**
-     * @deprecated 使用 getTimeMillis()
-     */
-    @Deprecated
-    public Instant getCommitTime() {
-        return Instant.ofEpochMilli(timeMillis);
-    }
-    
     public long getTotalRecordCount() {
         return totalRecordCount;
     }
@@ -194,26 +158,6 @@ public class Snapshot {
         return deltaRecordCount;
     }
 
-    /**
-     * 持久化快照（仅写入文件，不更新指针）
-     * 
-     * 注意：
-     * - 此方法仅负责写入 Snapshot 文件
-     * - LATEST 和 EARLIEST 指针由 Catalog 层面原子性地更新
-     * - 这样设计保证了原子性：如果任何步骤失败，Catalog 可以回滚
-     * 
-     * @param pathFactory 路径工厂
-     * @param database 数据库名
-     * @param table 表名
-     * @throws IOException 序列化异常
-     * 
-     * @deprecated 使用 {@link #writeToFile(PathFactory, String, String)} 更明确
-     */
-    @Deprecated
-    public void persist(PathFactory pathFactory, String database, String table) throws IOException {
-        writeToFile(pathFactory, database, table);
-    }
-    
     /**
      * 将快照写入文件（不更新指针）
      * 

@@ -133,8 +133,10 @@ class ManifestTest {
     void testManifestList() throws IOException {
         // 创建 Manifest List
         ManifestList manifestList = new ManifestList();
-        manifestList.addManifestFile("manifest-abc123");
-        manifestList.addManifestFile("manifest-def456");
+        ManifestFileMeta meta1 = new ManifestFileMeta("manifest-abc123", 0, 0, 0, 0, null, null);
+        ManifestFileMeta meta2 = new ManifestFileMeta("manifest-def456", 0, 0, 0, 0, null, null);
+        manifestList.addManifestFile(meta1);
+        manifestList.addManifestFile(meta2);
         
         assertEquals(2, manifestList.size());
         assertFalse(manifestList.isEmpty());

@@ -107,7 +107,7 @@ public class MiniPaimonExample {
         
         // 创建快照
         Snapshot snapshot1 = snapshotManager.createSnapshot(schema.getSchemaId(), Arrays.asList(entry1, entry2));
-        System.out.println("创建快照 1: " + snapshot1.getSnapshotId());
+        System.out.println("创建快照 1: " + snapshot1.getId());
         
         // 创建更多条目
         DataFileMeta fileMeta3 = new DataFileMeta(
@@ -146,10 +146,10 @@ public class MiniPaimonExample {
         
         // 创建第二个快照
         Snapshot snapshot2 = snapshotManager.createSnapshot(schema.getSchemaId(), Arrays.asList(entry3, entry4));
-        System.out.println("创建快照 2: " + snapshot2.getSnapshotId());
+        System.out.println("创建快照 2: " + snapshot2.getId());
         
         Snapshot latestSnapshot = snapshotManager.getLatestSnapshot();
-        System.out.println("最新快照: " + latestSnapshot.getSnapshotId());
+        System.out.println("最新快照: " + latestSnapshot.getId());
         
         System.out.println("活跃文件数量: " + snapshotManager.getActiveFiles().size());
         

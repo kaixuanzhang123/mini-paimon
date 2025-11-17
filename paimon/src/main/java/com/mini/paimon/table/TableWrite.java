@@ -88,13 +88,14 @@ public class TableWrite implements AutoCloseable {
      * 根据表类型创建对应的 RecordWriter
      */
     private RecordWriter createWriter(String database, String tableName, long writerId) throws IOException {
+        // 获取索引配置（对所有表类型）
+        Map<String, List<IndexType>> indexConfig = getIndexConfig();
+        
         if (tableType.isPrimaryKey()) {
-            // 主键表: 使用 MergeTreeWriter
-            return new MergeTreeWriter(schema, table.pathFactory(), database, tableName, writerId);
+            // 主键表: 使用 MergeTreeWriter (现在也支持索引)
+            return new MergeTreeWriter(schema, table.pathFactory(), database, tableName, writerId, indexConfig);
         } else {
             // 仅追加表: 使用 AppendOnlyWriter
-            // 获取索引配置
-            Map<String, List<IndexType>> indexConfig = getIndexConfig();
             return new AppendOnlyWriter(schema, table.pathFactory(), database, tableName, writerId, indexConfig);
         }
     }

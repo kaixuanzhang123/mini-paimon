@@ -79,19 +79,7 @@ public class CsvReader implements AutoCloseable {
         
         return row;
     }
-    
-    /**
-     * 读取所有行
-     */
-    public List<Row> readAll() throws IOException {
-        List<Row> rows = new ArrayList<>();
-        Row row;
-        while ((row = readRow()) != null) {
-            rows.add(row);
-        }
-        return rows;
-    }
-    
+
     /**
      * 解析 CSV 行
      * 处理引号和转义字符
