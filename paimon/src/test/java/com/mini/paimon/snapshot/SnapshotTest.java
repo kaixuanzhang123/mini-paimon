@@ -2,10 +2,10 @@ package com.mini.paimon.snapshot;
 
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.DataFileMeta;
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.RowKey;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.RowKey;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

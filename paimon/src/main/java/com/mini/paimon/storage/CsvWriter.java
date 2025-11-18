@@ -1,8 +1,8 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

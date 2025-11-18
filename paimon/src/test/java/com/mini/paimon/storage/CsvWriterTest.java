@@ -1,9 +1,9 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

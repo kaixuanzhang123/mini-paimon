@@ -3,7 +3,7 @@ package com.mini.paimon.reader;
 import com.mini.paimon.format.FileFormat;
 import com.mini.paimon.format.FileFormatFactory;
 import com.mini.paimon.format.FormatReaderFactory;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Projection;
 

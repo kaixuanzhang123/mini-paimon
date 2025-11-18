@@ -4,10 +4,7 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.FileSystemCatalog;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Row;
 import com.mini.paimon.table.Table;
-import com.mini.paimon.table.TableRead;
-import com.mini.paimon.table.TableScan;
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,14 +12,11 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Comparator;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 

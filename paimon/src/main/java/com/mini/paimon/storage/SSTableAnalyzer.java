@@ -3,8 +3,8 @@ package com.mini.paimon.storage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.mini.paimon.metadata.RowKey;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.RowKey;
+import com.mini.paimon.schema.Schema;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -324,7 +324,7 @@ public class SSTableAnalyzer {
                             
                             // 读取实际的行数据
                             try {
-                                com.mini.paimon.metadata.Row row = dataBlock.getRowByIndex(entry);
+                                com.mini.paimon.schema.Row row = dataBlock.getRowByIndex(entry);
                                 rowNode.put("value", row != null ? row.toString() : "");
                             } catch (Exception ex) {
                                 rowNode.put("value", "Error reading row: " + ex.getMessage());

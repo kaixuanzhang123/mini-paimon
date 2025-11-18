@@ -1,7 +1,6 @@
 package com.mini.paimon.spark.source;
 
-import com.mini.paimon.manifest.DataFileMeta;
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 import com.mini.paimon.spark.table.SparkRowConverter;
 import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Table;

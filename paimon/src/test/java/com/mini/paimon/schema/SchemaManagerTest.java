@@ -1,4 +1,4 @@
-package com.mini.paimon.metadata;
+package com.mini.paimon.schema;
 
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;

@@ -1,5 +1,6 @@
 package com.mini.paimon.snapshot;
 
+import com.mini.paimon.branch.BranchManager;
 import com.mini.paimon.utils.IdGenerator;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.manifest.ManifestEntry;
@@ -25,6 +26,7 @@ import java.util.stream.Stream;
  * 
  * 负责快照的创建、管理和查询
  * 支持多种提交类型：APPEND/COMPACT/OVERWRITE
+ * 支持分支隔离
  */
 public class SnapshotManager {
     private static final Logger logger = LoggerFactory.getLogger(SnapshotManager.class);
@@ -38,6 +40,9 @@ public class SnapshotManager {
     /** 表名 */
     private final String table;
     
+    /** 分支名 */
+    private final String branch;
+    
     /** ID 生成器 */
     private final IdGenerator idGenerator;
     
@@ -48,12 +53,36 @@ public class SnapshotManager {
     private final String commitUser;
 
     public SnapshotManager(PathFactory pathFactory, String database, String table) {
+        this(pathFactory, database, table, null);
+    }
+    
+    public SnapshotManager(PathFactory pathFactory, String database, String table, String branch) {
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
+        this.branch = BranchManager.normalizeBranch(branch);
         this.idGenerator = new IdGenerator();
         this.snapshotIdGenerator = new AtomicLong(initializeSnapshotId());
         this.commitUser = UUID.randomUUID().toString();
+    }
+    
+    /**
+     * 创建一个新的 SnapshotManager，使用指定的分支
+     */
+    public SnapshotManager copyWithBranch(String branchName) {
+        return new SnapshotManager(
+            pathFactory.copyWithBranch(branchName),
+            database,
+            table,
+            branchName
+        );
+    }
+    
+    /**
+     * 获取当前分支名
+     */
+    public String getBranch() {
+        return branch;
     }
     
     /**
@@ -200,8 +229,8 @@ public class SnapshotManager {
         long fileSize = 0;
         long numAddedFiles = 0;
         long numDeletedFiles = 0;
-        com.mini.paimon.metadata.RowKey minKey = null;
-        com.mini.paimon.metadata.RowKey maxKey = null;
+        com.mini.paimon.schema.RowKey minKey = null;
+        com.mini.paimon.schema.RowKey maxKey = null;
         
         for (ManifestEntry entry : entries) {
             fileSize += entry.getFile().getFileSize();

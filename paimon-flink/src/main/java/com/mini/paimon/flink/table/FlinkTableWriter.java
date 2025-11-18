@@ -1,8 +1,6 @@
 package com.mini.paimon.flink.table;
 
-import com.mini.paimon.catalog.Catalog;
-import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 import com.mini.paimon.table.Table;
 import com.mini.paimon.table.TableWrite;
 import org.apache.flink.table.data.RowData;

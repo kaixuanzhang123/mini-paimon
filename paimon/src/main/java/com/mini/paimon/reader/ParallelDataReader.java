@@ -1,12 +1,9 @@
-package com.mini.paimon.read;
+package com.mini.paimon.reader;
 
 import com.mini.paimon.manifest.DataFileMeta;
 import com.mini.paimon.manifest.ManifestEntry;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.reader.KeyValueFileReader;
-import com.mini.paimon.reader.KeyValueFileReaderFactory;
-import com.mini.paimon.reader.RecordReader;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.DataTableScan;
 import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Projection;

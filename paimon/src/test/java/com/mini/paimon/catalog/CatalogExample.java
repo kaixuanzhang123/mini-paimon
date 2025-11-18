@@ -1,9 +1,9 @@
 package com.mini.paimon.catalog;
 
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.schema.TableMetadata;
 import com.mini.paimon.snapshot.Snapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

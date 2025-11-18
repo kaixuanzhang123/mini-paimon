@@ -1,7 +1,7 @@
 package com.mini.paimon.reader;
 
 import com.mini.paimon.index.SimpleBitmap;
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 
 import java.io.IOException;
 

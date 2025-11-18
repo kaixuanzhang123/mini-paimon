@@ -1,4 +1,4 @@
-package com.mini.paimon.metadata;
+package com.mini.paimon.schema;
 
 import com.mini.paimon.partition.DynamicPartitionGenerator;
 import com.mini.paimon.partition.PartitionSpec;
@@ -7,7 +7,6 @@ import com.mini.paimon.storage.MergeEngine;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 

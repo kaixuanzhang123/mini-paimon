@@ -1,13 +1,11 @@
 package com.mini.paimon.flink.catalog;
 
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.Table;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.CatalogTableImpl;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;

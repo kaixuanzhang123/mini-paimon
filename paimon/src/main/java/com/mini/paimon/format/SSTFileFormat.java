@@ -1,6 +1,6 @@
 package com.mini.paimon.format;
 
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.reader.KeyValueFileReader;
 import com.mini.paimon.reader.SSTableKeyValueReader;
 import com.mini.paimon.table.Predicate;

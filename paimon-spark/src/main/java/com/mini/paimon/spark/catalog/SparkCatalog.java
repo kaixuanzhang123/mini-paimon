@@ -4,7 +4,11 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.exception.CatalogException;
 import com.mini.paimon.index.IndexType;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.spark.procedure.BaseProcedure;
+import com.mini.paimon.spark.procedure.CreateBranchProcedure;
+import com.mini.paimon.spark.procedure.DropBranchProcedure;
+import com.mini.paimon.spark.procedure.ListBranchesProcedure;
 import com.mini.paimon.table.Table;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -67,6 +71,13 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             );
             
             Table paimonTable = catalog.getTable(identifier);
+            
+            // 如果 identifier 包含分支信息，切换到对应分支
+            String branch = identifier.getBranch();
+            if (branch != null) {
+                paimonTable = paimonTable.switchToBranch(branch);
+            }
+            
             return new SparkTable(paimonTable, warehouse);
         } catch (CatalogException e) {
             throw new NoSuchTableException(ident);
@@ -154,7 +165,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             }
             
             Schema currentSchema = catalog.getTableSchema(identifier);
-            java.util.List<com.mini.paimon.metadata.Field> fields = new java.util.ArrayList<>(currentSchema.getFields());
+            java.util.List<com.mini.paimon.schema.Field> fields = new java.util.ArrayList<>(currentSchema.getFields());
             
             for (TableChange change : changes) {
                 if (change instanceof TableChange.AddColumn) {
@@ -164,10 +175,10 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                         throw new UnsupportedOperationException("Nested columns are not supported");
                     }
                     String fieldName = fieldNames[0];
-                    com.mini.paimon.metadata.DataType dataType = 
+                    com.mini.paimon.schema.DataType dataType = 
                         SparkSchemaConverter.toDataType(addColumn.dataType());
                     boolean nullable = addColumn.isNullable();
-                    fields.add(new com.mini.paimon.metadata.Field(fieldName, dataType, nullable));
+                    fields.add(new com.mini.paimon.schema.Field(fieldName, dataType, nullable));
                     LOG.info("Adding column: {} {}", fieldName, dataType);
                     
                 } else if (change instanceof TableChange.DeleteColumn) {
@@ -190,9 +201,9 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                     String newName = renameColumn.newName();
                     
                     for (int i = 0; i < fields.size(); i++) {
-                        com.mini.paimon.metadata.Field field = fields.get(i);
+                        com.mini.paimon.schema.Field field = fields.get(i);
                         if (field.getName().equals(oldName)) {
-                            fields.set(i, new com.mini.paimon.metadata.Field(
+                            fields.set(i, new com.mini.paimon.schema.Field(
                                 newName, field.getType(), field.isNullable()));
                             break;
                         }
@@ -341,6 +352,48 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             LOG.error("Failed to drop namespace: {}", Arrays.toString(namespace), e);
             return false;
         }
+    }
+    
+    // ==================== Procedure 支持 ====================
+    
+    /**
+     * 获取指定的 Procedure
+     * 
+     * 注意：由于 Spark 3.3.x 没有标准的 Procedure 接口，这是一个扩展方法。
+     * 使用者可以通过此方法获取 Procedure 实例，然后调用其 call 方法。
+     * 
+     * 支持的 procedures:
+     * - create_branch: 创建分支
+     * - drop_branch: 删除分支
+     * - list_branches: 列出所有分支
+     * 
+     * @param procedureName Procedure 名称
+     * @return Procedure 实例，如果不存在返回 null
+     */
+    public BaseProcedure getProcedure(String procedureName) {
+        if (procedureName == null) {
+            return null;
+        }
+        
+        switch (procedureName.toLowerCase()) {
+            case "create_branch":
+                return new CreateBranchProcedure(catalog);
+            case "drop_branch":
+                return new DropBranchProcedure(catalog);
+            case "list_branches":
+                return new ListBranchesProcedure(catalog);
+            default:
+                return null;
+        }
+    }
+    
+    /**
+     * 列出所有可用的 Procedure 名称
+     * 
+     * @return Procedure 名称列表
+     */
+    public List<String> listProcedures() {
+        return Arrays.asList("create_branch", "drop_branch", "list_branches");
     }
 }
 

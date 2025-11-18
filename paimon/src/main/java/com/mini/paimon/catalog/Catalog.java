@@ -2,9 +2,9 @@ package com.mini.paimon.catalog;
 
 import com.mini.paimon.exception.CatalogException;
 import com.mini.paimon.index.IndexType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.schema.TableMetadata;
 import com.mini.paimon.snapshot.Snapshot;
 
 import java.io.Closeable;
@@ -229,6 +229,38 @@ public interface Catalog extends Closeable {
     List<Snapshot> listSnapshots(Identifier identifier) throws CatalogException;
     
     List<com.mini.paimon.partition.PartitionSpec> listPartitions(String database, String table) throws CatalogException;
+    
+    // ==================== 分支操作 ====================
+    
+    /**
+     * 创建分支
+     * 
+     * @param identifier 表标识符（不能包含分支和系统表）
+     * @param branch 分支名
+     * @param fromTag 从哪个 Tag 创建（null 表示创建空分支）
+     * @throws CatalogException.TableNotExistException 表不存在
+     * @throws IllegalArgumentException 分支名非法或已存在
+     */
+    void createBranch(Identifier identifier, String branch, String fromTag) throws CatalogException;
+    
+    /**
+     * 删除分支
+     * 
+     * @param identifier 表标识符（不能包含分支和系统表）
+     * @param branch 分支名
+     * @throws CatalogException.TableNotExistException 表不存在
+     * @throws IllegalArgumentException 分支不存在
+     */
+    void dropBranch(Identifier identifier, String branch) throws CatalogException;
+    
+    /**
+     * 列出表的所有分支
+     * 
+     * @param identifier 表标识符（不能包含分支和系统表）
+     * @return 分支列表（不包括主分支 main）
+     * @throws CatalogException.TableNotExistException 表不存在
+     */
+    List<String> listBranches(Identifier identifier) throws CatalogException;
     
     // ==================== Table 操作 ====================
     

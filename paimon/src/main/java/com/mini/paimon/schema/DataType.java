@@ -1,4 +1,4 @@
-package com.mini.paimon.metadata;
+package com.mini.paimon.schema;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;

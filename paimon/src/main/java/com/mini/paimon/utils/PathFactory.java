@@ -1,5 +1,7 @@
 package com.mini.paimon.utils;
 
+import com.mini.paimon.branch.BranchManager;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,13 +18,39 @@ import java.nio.file.Paths;
  *         ├── schema/
  *         ├── snapshot/
  *         ├── manifest/
- *         └── data/
+ *         ├── data/
+ *         └── branch/
+ *             └── branch-{name}/
+ *                 ├── schema/
+ *                 ├── snapshot/
+ *                 ├── manifest/
+ *                 └── data/
  */
 public class PathFactory {
     private final String warehousePath;
+    private final String branch;
 
     public PathFactory(String warehousePath) {
+        this(warehousePath, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+    
+    public PathFactory(String warehousePath, String branch) {
         this.warehousePath = warehousePath;
+        this.branch = BranchManager.normalizeBranch(branch);
+    }
+    
+    /**
+     * 创建一个新的 PathFactory，使用指定的分支
+     */
+    public PathFactory copyWithBranch(String branchName) {
+        return new PathFactory(warehousePath, branchName);
+    }
+    
+    /**
+     * 获取当前分支名
+     */
+    public String getBranch() {
+        return branch;
     }
 
     /**
@@ -33,17 +61,25 @@ public class PathFactory {
     }
 
     /**
-     * 获取表路径
+     * 获取表路径（不考虑分支）
      */
     public Path getTablePath(String database, String table) {
         return Paths.get(warehousePath, database, table);
+    }
+    
+    /**
+     * 获取分支路径
+     */
+    private String getBranchPath(String database, String table) {
+        Path tablePath = getTablePath(database, table);
+        return BranchManager.branchPath(tablePath.toString(), branch);
     }
 
     /**
      * 获取Schema目录
      */
     public Path getSchemaDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "schema");
+        return Paths.get(getBranchPath(database, table), "schema");
     }
 
     /**
@@ -57,7 +93,7 @@ public class PathFactory {
      * 获取Snapshot目录
      */
     public Path getSnapshotDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "snapshot");
+        return Paths.get(getBranchPath(database, table), "snapshot");
     }
 
     /**
@@ -85,7 +121,7 @@ public class PathFactory {
      * 获取Manifest目录
      */
     public Path getManifestDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "manifest");
+        return Paths.get(getBranchPath(database, table), "manifest");
     }
 
     /**
@@ -120,14 +156,14 @@ public class PathFactory {
      * 获取Data目录
      */
     public Path getDataDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "data");
+        return Paths.get(getBranchPath(database, table), "data");
     }
 
     /**
      * 获取WAL目录
      */
     public Path getWalDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "wal");
+        return Paths.get(getBranchPath(database, table), "wal");
     }
 
     /**
@@ -146,7 +182,7 @@ public class PathFactory {
     }
     
     public Path getTempDir(String database, String table) {
-        return Paths.get(warehousePath, database, table, "tmp");
+        return Paths.get(getBranchPath(database, table), "tmp");
     }
     
     public Path getTempFilePath(String database, String table, String tempFileName) {
@@ -155,8 +191,7 @@ public class PathFactory {
     
     public Path getSSTPathWithBucket(String database, String table, String partitionPath, 
                                     int bucket, int level, long sequence) {
-        Path tablePath = getTablePath(database, table);
-        return tablePath
+        return Paths.get(getBranchPath(database, table))
             .resolve(partitionPath)
             .resolve("bucket-" + bucket)
             .resolve(String.format("data-%d-%03d.sst", level, sequence));
@@ -172,7 +207,7 @@ public class PathFactory {
      * @return Bucket 目录路径
      */
     public Path getBucketDir(String database, String table, String partitionPath, int bucket) {
-        return getTablePath(database, table)
+        return Paths.get(getBranchPath(database, table))
             .resolve(partitionPath)
             .resolve("bucket-" + bucket);
     }

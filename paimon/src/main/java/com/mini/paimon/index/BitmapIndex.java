@@ -283,7 +283,7 @@ public class BitmapIndex extends AbstractFileIndex {
         }
         
         @Override
-        public boolean test(com.mini.paimon.metadata.Row row, com.mini.paimon.metadata.Schema schema) {
+        public boolean test(com.mini.paimon.schema.Row row, com.mini.paimon.schema.Schema schema) {
             // 查找字段索引
             int fieldIndex = -1;
             for (int i = 0; i < schema.getFields().size(); i++) {

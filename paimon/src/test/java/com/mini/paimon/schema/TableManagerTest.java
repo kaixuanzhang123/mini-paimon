@@ -1,4 +1,4 @@
-package com.mini.paimon.metadata;
+package com.mini.paimon.schema;
 
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;
@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;

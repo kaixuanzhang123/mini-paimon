@@ -1,7 +1,7 @@
 package com.mini.paimon.catalog;
 
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.Table;
 import com.mini.paimon.utils.PathFactory;
 

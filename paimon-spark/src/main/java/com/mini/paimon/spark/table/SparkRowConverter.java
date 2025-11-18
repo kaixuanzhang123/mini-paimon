@@ -1,9 +1,9 @@
 package com.mini.paimon.spark.table;
 
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.types.StructType;

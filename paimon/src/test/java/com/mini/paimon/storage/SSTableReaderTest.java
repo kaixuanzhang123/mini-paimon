@@ -1,6 +1,6 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 import com.mini.paimon.utils.PathFactory;
 
 import java.io.IOException;

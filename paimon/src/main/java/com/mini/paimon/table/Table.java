@@ -1,13 +1,12 @@
 package com.mini.paimon.table;
 
+import com.mini.paimon.branch.BranchManager;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.partition.PartitionManager;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.utils.PathFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
@@ -92,4 +91,17 @@ public interface Table {
      * 获取 PartitionManager
      */
     PartitionManager partitionManager();
+    
+    /**
+     * 获取 BranchManager
+     */
+    BranchManager branchManager();
+    
+    /**
+     * 切换到指定分支，返回新的 Table 实例
+     * 
+     * @param branchName 分支名
+     * @return 切换后的 Table 实例
+     */
+    Table switchToBranch(String branchName);
 }

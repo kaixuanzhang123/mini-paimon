@@ -3,11 +3,10 @@ package com.mini.paimon.storage;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.RowKey;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**

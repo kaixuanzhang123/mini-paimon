@@ -1,13 +1,12 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.utils.PathFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * 分区 LSMTree

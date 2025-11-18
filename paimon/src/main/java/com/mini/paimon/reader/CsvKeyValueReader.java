@@ -1,9 +1,9 @@
 package com.mini.paimon.reader;
 
 import com.mini.paimon.index.SimpleBitmap;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.RowKey;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.RowKey;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.storage.CsvReader;
 import com.mini.paimon.table.Predicate;
 import com.mini.paimon.table.Projection;

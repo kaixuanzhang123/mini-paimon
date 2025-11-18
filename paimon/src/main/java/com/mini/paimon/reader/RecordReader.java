@@ -1,7 +1,5 @@
 package com.mini.paimon.reader;
 
-import com.mini.paimon.metadata.Row;
-
 import java.io.Closeable;
 import java.io.IOException;
 

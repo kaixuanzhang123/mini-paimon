@@ -1,11 +1,10 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;

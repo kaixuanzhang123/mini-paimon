@@ -1,11 +1,11 @@
 package com.mini.paimon;
 
 import com.mini.paimon.catalog.*;
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.RowKey;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.RowKey;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.*;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.manifest.ManifestEntry;

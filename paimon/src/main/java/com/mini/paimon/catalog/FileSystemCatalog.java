@@ -1,11 +1,13 @@
 package com.mini.paimon.catalog;
 
+import com.mini.paimon.branch.BranchManager;
+import com.mini.paimon.branch.FileSystemBranchManager;
 import com.mini.paimon.exception.CatalogException;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.SchemaManager;
-import com.mini.paimon.metadata.TableManager;
-import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.schema.SchemaManager;
+import com.mini.paimon.schema.TableManager;
+import com.mini.paimon.schema.TableMetadata;
 import com.mini.paimon.partition.PartitionSpec;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
@@ -579,7 +581,19 @@ public class FileSystemCatalog implements Catalog {
             return new ArrayList<>();
         }
         
-        return new ArrayList<>();
+        // 使用 PartitionManager 列出分区
+        try {
+            com.mini.paimon.partition.PartitionManager partitionManager = 
+                new com.mini.paimon.partition.PartitionManager(
+                    pathFactory, 
+                    database, 
+                    table, 
+                    schema.getPartitionKeys()
+                );
+            return partitionManager.listPartitions();
+        } catch (IOException e) {
+            throw new CatalogException("Failed to list partitions for table: " + identifier, e);
+        }
     }
     
     // ==================== Table 操作 ====================
@@ -597,6 +611,58 @@ public class FileSystemCatalog implements Catalog {
     }
     
     // ==================== 生命周期管理 ====================
+    
+    // ==================== 分支操作 ====================
+    
+    @Override
+    public void createBranch(Identifier identifier, String branch, String fromTag) throws CatalogException {
+        checkNotClosed();
+        
+        if (!tableExists(identifier)) {
+            throw new CatalogException.TableNotExistException(identifier);
+        }
+        
+        try {
+            BranchManager branchManager = getBranchManager(identifier);
+            branchManager.createBranch(branch, fromTag);
+            logger.info("Created branch '{}' for table {}", branch, identifier.getFullName());
+        } catch (Exception e) {
+            throw new CatalogException("Failed to create branch: " + branch, e);
+        }
+    }
+    
+    @Override
+    public void dropBranch(Identifier identifier, String branch) throws CatalogException {
+        checkNotClosed();
+        
+        if (!tableExists(identifier)) {
+            throw new CatalogException.TableNotExistException(identifier);
+        }
+        
+        try {
+            BranchManager branchManager = getBranchManager(identifier);
+            branchManager.dropBranch(branch);
+            logger.info("Dropped branch '{}' for table {}", branch, identifier.getFullName());
+        } catch (Exception e) {
+            throw new CatalogException("Failed to drop branch: " + branch, e);
+        }
+    }
+    
+    @Override
+    public List<String> listBranches(Identifier identifier) throws CatalogException {
+        checkNotClosed();
+        
+        if (!tableExists(identifier)) {
+            throw new CatalogException.TableNotExistException(identifier);
+        }
+        
+        try {
+            BranchManager branchManager = getBranchManager(identifier);
+            return branchManager.branches();
+        } catch (Exception e) {
+            throw new CatalogException("Failed to list branches", e);
+        }
+    }
     
     @Override
     public String name() {
@@ -639,6 +705,22 @@ public class FileSystemCatalog implements Catalog {
     private SnapshotManager getSnapshotManager(Identifier identifier) {
         return snapshotManagerCache.computeIfAbsent(identifier, id -> 
             new SnapshotManager(pathFactory, id.getDatabase(), id.getTable()));
+    }
+    
+    /**
+     * 获取 BranchManager
+     */
+    private BranchManager getBranchManager(Identifier identifier) {
+        SchemaManager schemaManager = getSchemaManager(identifier);
+        SnapshotManager snapshotManager = getSnapshotManager(identifier);
+        
+        return new FileSystemBranchManager(
+            pathFactory,
+            identifier.getDatabase(),
+            identifier.getTable(),
+            snapshotManager,
+            schemaManager
+        );
     }
     
     /**

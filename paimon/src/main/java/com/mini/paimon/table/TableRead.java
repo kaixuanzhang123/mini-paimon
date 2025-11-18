@@ -1,6 +1,6 @@
 package com.mini.paimon.table;
 
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 
 import java.io.IOException;
 import java.util.List;

@@ -4,10 +4,10 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.FileSystemCatalog;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.utils.PathFactory;
 

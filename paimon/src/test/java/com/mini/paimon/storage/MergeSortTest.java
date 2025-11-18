@@ -1,6 +1,6 @@
 package com.mini.paimon.storage;
 
-import com.mini.paimon.metadata.*;
+import com.mini.paimon.schema.*;
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

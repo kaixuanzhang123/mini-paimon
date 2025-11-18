@@ -2,7 +2,7 @@ package com.mini.paimon.manifest;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.schema.RowKey;
 
 import java.util.Objects;
 

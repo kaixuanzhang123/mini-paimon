@@ -1,6 +1,5 @@
 package com.mini.paimon.index;
 
-import com.mini.paimon.metadata.Row;
 import com.mini.paimon.table.Predicate;
 
 import java.io.IOException;

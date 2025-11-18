@@ -1,7 +1,7 @@
 package com.mini.paimon.storage;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

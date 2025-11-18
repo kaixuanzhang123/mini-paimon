@@ -1,9 +1,8 @@
 package com.mini.paimon.spark.sink;
 
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 import com.mini.paimon.spark.table.SparkRowConverter;
 import com.mini.paimon.table.Table;
-import com.mini.paimon.table.TableCommit;
 import com.mini.paimon.table.TableWrite;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.write.DataWriter;
@@ -13,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.List;
 
 public class PaimonDataWriter implements DataWriter<InternalRow> {
 

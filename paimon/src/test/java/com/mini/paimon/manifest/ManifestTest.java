@@ -1,6 +1,6 @@
 package com.mini.paimon.manifest;
 
-import com.mini.paimon.metadata.RowKey;
+import com.mini.paimon.schema.RowKey;
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;

@@ -1,10 +1,10 @@
 package com.mini.paimon.catalog;
 
 import com.mini.paimon.exception.CatalogException;
-import com.mini.paimon.metadata.DataType;
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.schema.DataType;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.schema.TableMetadata;
 import com.mini.paimon.snapshot.Snapshot;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

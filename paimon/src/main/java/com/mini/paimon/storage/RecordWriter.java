@@ -1,7 +1,7 @@
 package com.mini.paimon.storage;
 
 import com.mini.paimon.manifest.DataFileMeta;
-import com.mini.paimon.metadata.Row;
+import com.mini.paimon.schema.Row;
 
 import java.io.IOException;
 import java.util.List;

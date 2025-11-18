@@ -3,8 +3,12 @@ package com.mini.paimon.flink.catalog;
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
 import com.mini.paimon.exception.CatalogException;
+import com.mini.paimon.flink.procedure.CreateBranchProcedure;
+import com.mini.paimon.flink.procedure.DropBranchProcedure;
+import com.mini.paimon.flink.procedure.ListBranchesProcedure;
+import com.mini.paimon.flink.procedure.ProcedureBase;
 import com.mini.paimon.index.IndexType;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.Table;
 import org.apache.flink.table.catalog.*;
 import org.apache.flink.table.catalog.exceptions.*;
@@ -15,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -137,9 +142,16 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
-    public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {        try {
+    public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
+        try {
             Identifier identifier = new Identifier(tablePath.getDatabaseName(), tablePath.getObjectName());
             Table table = catalog.getTable(identifier);
+            
+            // 如果 identifier 包含分支信息，切换到对应分支
+            String branch = identifier.getBranch();
+            if (branch != null) {
+                table = table.switchToBranch(branch);
+            }
             
             return FlinkTableFactory.createFlinkTable(table, warehouse);
         } catch (com.mini.paimon.exception.CatalogException e) {
@@ -422,5 +434,47 @@ public class FlinkCatalog extends AbstractCatalog {
                                               CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists) 
             throws PartitionNotExistException, CatalogException {
         throw new UnsupportedOperationException("alterPartitionColumnStatistics is not supported");
+    }
+    
+    // ==================== Procedure 支持 ====================
+    
+    /**
+     * 获取指定的 Procedure
+     * 
+     * 注意：由于 Flink 1.17.x 的 Procedure 接口尚未完全稳定，这是一个扩展方法。
+     * 使用者可以通过此方法获取 Procedure 实例，然后调用其 call 方法。
+     * 
+     * 支持的 procedures:
+     * - create_branch: 创建分支
+     * - drop_branch: 删除分支
+     * - list_branches: 列出所有分支
+     * 
+     * @param procedureName Procedure 名称
+     * @return Procedure 实例，如果不存在返回 null
+     */
+    public ProcedureBase getProcedure(String procedureName) {
+        if (procedureName == null) {
+            return null;
+        }
+        
+        switch (procedureName.toLowerCase()) {
+            case "create_branch":
+                return new CreateBranchProcedure(catalog);
+            case "drop_branch":
+                return new DropBranchProcedure(catalog);
+            case "list_branches":
+                return new ListBranchesProcedure(catalog);
+            default:
+                return null;
+        }
+    }
+    
+    /**
+     * 列出所有可用的 Procedure 名称
+     * 
+     * @return Procedure 名称列表
+     */
+    public List<String> listProcedures() {
+        return Arrays.asList("create_branch", "drop_branch", "list_branches");
     }
 }

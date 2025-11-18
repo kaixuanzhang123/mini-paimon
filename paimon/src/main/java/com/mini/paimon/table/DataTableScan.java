@@ -7,7 +7,7 @@ import com.mini.paimon.manifest.ManifestFile;
 import com.mini.paimon.manifest.ManifestFileMeta;
 import com.mini.paimon.manifest.ManifestList;
 import com.mini.paimon.manifest.DataFileMeta;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
 import com.mini.paimon.utils.PathFactory;

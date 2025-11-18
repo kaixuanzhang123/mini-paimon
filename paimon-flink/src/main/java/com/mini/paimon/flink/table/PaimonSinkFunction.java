@@ -4,7 +4,7 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.CatalogLoader;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.*;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.table.catalog.ObjectPath;
@@ -43,7 +43,7 @@ public class PaimonSinkFunction implements SinkFunction<RowData> {
         switch (kind) {
             case INSERT:
             case UPDATE_AFTER:
-                com.mini.paimon.metadata.Row row = FlinkRowConverter.toRow(value, schema);
+                com.mini.paimon.schema.Row row = FlinkRowConverter.toRow(value, schema);
                 tableWrite.write(row);
                 LOG.debug("Wrote {} row: {}", kind, row);
                 break;

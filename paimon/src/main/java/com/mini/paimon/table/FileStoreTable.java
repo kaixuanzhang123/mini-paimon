@@ -2,11 +2,14 @@ package com.mini.paimon.table;
 
 import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.metadata.TableMetadata;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.schema.SchemaManager;
+import com.mini.paimon.schema.TableMetadata;
 import com.mini.paimon.partition.PartitionManager;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.snapshot.SnapshotManager;
+import com.mini.paimon.branch.BranchManager;
+import com.mini.paimon.branch.FileSystemBranchManager;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -158,6 +161,56 @@ public class FileStoreTable implements Table {
     @Override
     public PartitionManager partitionManager() {
         return partitionManager;
+    }
+    
+    @Override
+    public BranchManager branchManager() {
+        SchemaManager schemaManager = new SchemaManager(
+            pathFactory,
+            identifier.getDatabase(),
+            identifier.getTable()
+        );
+        
+        return new FileSystemBranchManager(
+            pathFactory,
+            identifier.getDatabase(),
+            identifier.getTable(),
+            snapshotManager,
+            schemaManager
+        );
+    }
+    
+    @Override
+    public Table switchToBranch(String branchName) {
+        // 规范化分支名
+        String currentBranch = BranchManager.normalizeBranch(pathFactory.getBranch());
+        String targetBranch = BranchManager.normalizeBranch(branchName);
+        
+        // 如果已经在目标分支，直接返回
+        if (currentBranch.equals(targetBranch)) {
+            return this;
+        }
+        
+        // 加载目标分支的 Schema
+        SchemaManager branchSchemaManager = new SchemaManager(
+            pathFactory.copyWithBranch(targetBranch),
+            identifier.getDatabase(),
+            identifier.getTable(),
+            targetBranch
+        );
+        
+        Schema branchSchema;
+        try {
+            branchSchema = branchSchemaManager.getCurrentSchema();
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Branch '" + targetBranch + "' does not exist", e);
+        }
+        
+        // 创建新的 PathFactory 使用目标分支
+        PathFactory branchPathFactory = pathFactory.copyWithBranch(targetBranch);
+        
+        // 创建并返回新的 FileStoreTable 实例
+        return new FileStoreTable(catalog, identifier, branchSchema, branchPathFactory);
     }
 
     public Catalog catalog() {

@@ -1,5 +1,6 @@
-package com.mini.paimon.metadata;
+package com.mini.paimon.schema;
 
+import com.mini.paimon.branch.BranchManager;
 import com.mini.paimon.utils.PathFactory;
 import com.mini.paimon.utils.SerializationUtils;
 import org.slf4j.Logger;
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Schema 管理器
  * 负责表结构的持久化、版本管理和缓存
+ * 支持分支隔离
  */
 public class SchemaManager {
     private static final Logger logger = LoggerFactory.getLogger(SchemaManager.class);
@@ -27,6 +29,9 @@ public class SchemaManager {
     /** 表名 */
     private final String table;
     
+    /** 分支名 */
+    private final String branch;
+    
     /** Schema 缓存 */
     private final ConcurrentHashMap<Integer, Schema> schemaCache;
     
@@ -37,12 +42,36 @@ public class SchemaManager {
     private volatile Schema currentSchema;
 
     public SchemaManager(PathFactory pathFactory, String database, String table) {
+        this(pathFactory, database, table, null);
+    }
+    
+    public SchemaManager(PathFactory pathFactory, String database, String table, String branch) {
         this.pathFactory = pathFactory;
         this.database = database;
         this.table = table;
+        this.branch = BranchManager.normalizeBranch(branch);
         this.schemaCache = new ConcurrentHashMap<>();
         this.currentSchemaId = new AtomicInteger(-1);
         this.currentSchema = null;
+    }
+    
+    /**
+     * 创建一个新的 SchemaManager，使用指定的分支
+     */
+    public SchemaManager copyWithBranch(String branchName) {
+        return new SchemaManager(
+            pathFactory.copyWithBranch(branchName),
+            database,
+            table,
+            branchName
+        );
+    }
+    
+    /**
+     * 获取当前分支名
+     */
+    public String getBranch() {
+        return branch;
     }
 
     /**

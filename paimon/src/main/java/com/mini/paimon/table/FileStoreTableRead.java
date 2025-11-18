@@ -1,9 +1,9 @@
 package com.mini.paimon.table;
 
 import com.mini.paimon.manifest.ManifestEntry;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
-import com.mini.paimon.read.ParallelDataReader;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
+import com.mini.paimon.reader.ParallelDataReader;
 import com.mini.paimon.snapshot.Snapshot;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;

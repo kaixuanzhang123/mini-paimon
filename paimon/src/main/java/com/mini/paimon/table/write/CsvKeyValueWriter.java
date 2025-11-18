@@ -1,9 +1,9 @@
 package com.mini.paimon.table.write;
 
 import com.mini.paimon.manifest.DataFileMeta;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.RowKey;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.RowKey;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.storage.CsvWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

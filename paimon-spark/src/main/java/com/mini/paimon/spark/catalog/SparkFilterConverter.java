@@ -1,6 +1,6 @@
 package com.mini.paimon.spark.catalog;
 
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.table.Predicate;
 import org.apache.spark.sql.sources.*;
 import org.slf4j.Logger;

@@ -1,8 +1,8 @@
 package com.mini.paimon.table;
 
-import com.mini.paimon.metadata.Field;
-import com.mini.paimon.metadata.Row;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Field;
+import com.mini.paimon.schema.Row;
+import com.mini.paimon.schema.Schema;
 
 import java.io.Serializable;
 import java.util.List;

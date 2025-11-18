@@ -4,12 +4,9 @@ import com.mini.paimon.catalog.Catalog;
 import com.mini.paimon.catalog.CatalogContext;
 import com.mini.paimon.catalog.FileSystemCatalog;
 import com.mini.paimon.catalog.Identifier;
-import com.mini.paimon.metadata.Schema;
+import com.mini.paimon.schema.Schema;
 import com.mini.paimon.sql.SQLParserV2;
 import com.mini.paimon.utils.PathFactory;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * TBLPROPERTIES 语法测试
