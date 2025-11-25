@@ -1,48 +1,24 @@
 package com.mini.paimon.utils;
 
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * ID生成器
- * 用于生成各种ID（Snapshot ID、Sequence等）
+ * ID Generator
+ * 生成全局唯一的ID，用于manifest文件等
  */
 public class IdGenerator {
-    private final AtomicLong counter;
-
-    public IdGenerator() {
-        this(0);
-    }
-
-    public IdGenerator(long initialValue) {
-        this.counter = new AtomicLong(initialValue);
-    }
-
+    
     /**
-     * 生成下一个ID
+     * 生成manifest ID（使用UUID）
      */
-    public long nextId() {
-        return counter.incrementAndGet();
-    }
-
-    /**
-     * 获取当前ID（不递增）
-     */
-    public long currentId() {
-        return counter.get();
-    }
-
-    /**
-     * 生成UUID字符串
-     */
-    public static String generateUUID() {
+    public String generateManifestId() {
         return UUID.randomUUID().toString().replace("-", "");
     }
-
+    
     /**
-     * 生成Manifest文件ID
+     * 生成snapshot ID（由SnapshotManager管理，这里不使用）
      */
-    public static String generateManifestId() {
-        return generateUUID().substring(0, 16);
+    public long generateSnapshotId() {
+        throw new UnsupportedOperationException("Snapshot ID should be managed by SnapshotManager");
     }
 }

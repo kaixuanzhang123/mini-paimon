@@ -78,7 +78,7 @@ public class FileSystemBranchManager implements BranchManager {
                     "Cannot create branch from tag: no snapshots exist for table " + database + "/" + table);
             }
             
-            Snapshot latestSnapshot = snapshotManager.getLatestSnapshot();
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             
             // 复制 Snapshot 文件到分支目录
             Path sourceSnapshotPath = pathFactory.getSnapshotPath(database, table, latestSnapshot.getId());

@@ -126,7 +126,9 @@ public class AtomicCommitTest {
             String latestId2 = new String(Files.readAllBytes(latestPath2)).trim();
             long snapshotId = Long.parseLong(latestId2);
             
-            Snapshot latestSnapshot = Snapshot.load(pathFactory, "default", "test_table", snapshotId);
+            com.mini.paimon.snapshot.SnapshotManager snapshotManager = 
+                new com.mini.paimon.snapshot.SnapshotManager(pathFactory, "default", "test_table");
+            Snapshot latestSnapshot = snapshotManager.snapshot(snapshotId);
             System.out.println("✓ 可以通过 LATEST 指针加载快照: snapshot-" + snapshotId);
             System.out.println("  - CommitKind: " + latestSnapshot.getCommitKind());
             System.out.println("  - CommitIdentifier: " + latestSnapshot.getCommitIdentifier());

@@ -1,5 +1,6 @@
 package com.mini.paimon.utils;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -56,6 +57,13 @@ public class SerializationUtils {
      */
     public static <T> T readFromFile(Path path, Class<T> clazz) throws IOException {
         return OBJECT_MAPPER.readValue(path.toFile(), clazz);
+    }
+
+    /**
+     * 从文件反序列化对象（支持泛型）
+     */
+    public static <T> T readFromFile(Path path, TypeReference<T> typeRef) throws IOException {
+        return OBJECT_MAPPER.readValue(path.toFile(), typeRef);
     }
 
     /**

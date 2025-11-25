@@ -28,6 +28,26 @@ public class RowKey implements Comparable<RowKey>, java.io.Serializable {
     public RowKey(@JsonProperty("keyBytes") byte[] keyBytes) {
         this.keyBytes = Objects.requireNonNull(keyBytes, "Key bytes cannot be null");
     }
+    
+    /**
+     * 从单个整数值创建 RowKey（用于测试）
+     */
+    public static RowKey of(int value) {
+        ByteBuffer buffer = ByteBuffer.allocate(4);
+        buffer.putInt(value);
+        return new RowKey(buffer.array());
+    }
+    
+    /**
+     * 从多个整数值创建 RowKey（用于测试）
+     */
+    public static RowKey of(int... values) {
+        ByteBuffer buffer = ByteBuffer.allocate(values.length * 4);
+        for (int value : values) {
+            buffer.putInt(value);
+        }
+        return new RowKey(buffer.array());
+    }
 
     /**
      * 从Row中提取主键并序列化

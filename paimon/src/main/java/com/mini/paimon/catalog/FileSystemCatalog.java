@@ -467,41 +467,27 @@ public class FileSystemCatalog implements Catalog {
             
             String database = identifier.getDatabase();
             String table = identifier.getTable();
-            long snapshotId = snapshot.getId();
             
-            // 原子性提交快照：
-            // 1. 写入 Snapshot 文件
-            // 2. 更新 LATEST 指针
-            // 3. 更新 EARLIEST 指针（如果需要）
-            //
-            // 如果任何步骤失败，整个操作失败，保证一致性
+            // 使用AtomicRenameSnapshotCommit进行原子提交
+            SnapshotManager snapshotManager = getSnapshotManager(identifier);
+            com.mini.paimon.operation.SnapshotCommit snapshotCommit = 
+                new com.mini.paimon.operation.AtomicRenameSnapshotCommit(
+                    pathFactory, snapshotManager, database, table);
             
-            // 步骤 1：写入 Snapshot 文件
-            snapshot.writeToFile(pathFactory, database, table);
+            boolean committed = snapshotCommit.commit(snapshot, "main");
             
-            try {
-                // 步骤 2：更新 LATEST 指针
-                Snapshot.updateLatestSnapshot(pathFactory, database, table, snapshotId);
-                
-                // 步骤 3：更新 EARLIEST 指针（首次提交时）
-                Snapshot.updateEarliestSnapshot(pathFactory, database, table, snapshotId);
-                
-                logger.info("Committed snapshot {} for table {} atomically", snapshotId, identifier);
-                
-            } catch (IOException e) {
-                // 如果更新指针失败，尝试删除已写入的 Snapshot 文件（回滚）
-                logger.error("Failed to update snapshot pointers, rolling back snapshot {}", snapshotId, e);
-                try {
-                    Path snapshotPath = pathFactory.getSnapshotPath(database, table, snapshotId);
-                    Files.deleteIfExists(snapshotPath);
-                    logger.info("Rolled back snapshot file: {}", snapshotPath);
-                } catch (IOException rollbackError) {
-                    logger.error("Failed to rollback snapshot file", rollbackError);
-                }
-                throw new CatalogException("Failed to commit snapshot atomically for table: " + identifier, e);
+            if (!committed) {
+                throw new CatalogException("Snapshot commit failed due to ID conflict: " + snapshot.getId());
             }
             
-        } catch (IOException e) {
+            // 更新EARLIEST hint（首次提交时）
+            snapshotManager.commitEarliestHint(snapshot.getId());
+            
+            logger.info("Committed snapshot {} for table {}", snapshot.getId(), identifier);
+            
+        } catch (CatalogException e) {
+            throw e;
+        } catch (Exception e) {
             throw new CatalogException("Failed to commit snapshot for table: " + identifier, e);
         }
     }
@@ -522,7 +508,7 @@ public class FileSystemCatalog implements Catalog {
                 return null;
             }
             
-            return snapshotManager.getLatestSnapshot();
+            return snapshotManager.latestSnapshot();
             
         } catch (IOException e) {
             throw new CatalogException("Failed to get latest snapshot for table: " + identifier, e);
@@ -540,7 +526,7 @@ public class FileSystemCatalog implements Catalog {
             }
             
             SnapshotManager snapshotManager = getSnapshotManager(identifier);
-            return snapshotManager.getSnapshot(snapshotId);
+            return snapshotManager.snapshot(snapshotId);
             
         } catch (IOException e) {
             throw new CatalogException(
@@ -559,7 +545,7 @@ public class FileSystemCatalog implements Catalog {
             }
             
             SnapshotManager snapshotManager = getSnapshotManager(identifier);
-            return snapshotManager.getAllSnapshots();
+            return snapshotManager.listAllSnapshots();
             
         } catch (IOException e) {
             throw new CatalogException("Failed to list snapshots for table: " + identifier, e);

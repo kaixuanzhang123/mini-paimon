@@ -1,5 +1,7 @@
 package com.mini.paimon.manifest;
 
+import com.mini.paimon.io.ManifestFileIO;
+import com.mini.paimon.io.ManifestListIO;
 import com.mini.paimon.utils.PathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,8 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Manifest缓存管理器
- * 提供Manifest文件的缓存和增量读取机制
+ * Manifest 缓存管理器
+ * 提供 Manifest 文件的缓存和增量读取机制
  * 参考 Paimon ManifestCachingFilter 实现
  */
 public class ManifestCacheManager {
@@ -20,8 +22,8 @@ public class ManifestCacheManager {
     // Manifest文件缓存 - Key: manifestFileName, Value: ManifestFile
     private final Map<String, CachedManifestFile> manifestCache;
     
-    // Manifest List缓存 - Key: snapshotId, Value: ManifestList
-    private final Map<Long, ManifestList> manifestListCache;
+    // Manifest List缓存 - Key: snapshotId, Value: List<ManifestFileMeta>
+    private final Map<Long, List<ManifestFileMeta>> manifestListCache;
     
     // 缓存策略配置
     private final int maxCacheSize;
@@ -43,9 +45,9 @@ public class ManifestCacheManager {
     }
     
     /**
-     * 获取ManifestFile，优先从缓存读取
+     * 获取 ManifestFile，优先从缓存读取（使用 ManifestFileIO）
      */
-    public ManifestFile getManifestFile(PathFactory pathFactory, String database, 
+    public List<ManifestEntry> getManifestFile(PathFactory pathFactory, String database, 
                                        String table, String manifestId) throws IOException {
         String cacheKey = buildManifestCacheKey(database, table, manifestId);
         
@@ -54,73 +56,78 @@ public class ManifestCacheManager {
         if (cached != null && !cached.isExpired(cacheExpirationMs)) {
             logger.debug("Manifest cache hit: {}", manifestId);
             updateAccessTime(cacheKey);
-            return cached.manifestFile;
+            return cached.manifestFile.getEntries();
         }
         
-        // 缓存未命中，从磁盘加载
+        // 缓存未命中，从磁盘加载（使用 ManifestFileIO）
         logger.debug("Manifest cache miss: {}, loading from disk", manifestId);
-        ManifestFile manifestFile = ManifestFile.load(pathFactory, database, table, manifestId);
+        ManifestFileIO reader = new ManifestFileIO(pathFactory, database, table);
+        List<ManifestEntry> entries = reader.readManifestById(manifestId);
+        ManifestFile manifestFile = new ManifestFile(entries);
         
         // 放入缓存
         putInCache(cacheKey, manifestFile);
         
-        return manifestFile;
+        return entries;
     }
     
     /**
-     * 获取ManifestList，优先从缓存读取
+     * 获取 ManifestList，优先从缓存读取（使用 ManifestListIO）
      */
-    public ManifestList getManifestList(PathFactory pathFactory, String database, 
+    public List<ManifestFileMeta> getManifestList(PathFactory pathFactory, String database, 
                                        String table, long snapshotId) throws IOException {
         // 检查缓存
-        ManifestList cached = manifestListCache.get(snapshotId);
+        List<ManifestFileMeta> cached = manifestListCache.get(snapshotId);
         if (cached != null) {
             logger.debug("ManifestList cache hit: snapshot {}", snapshotId);
             return cached;
         }
         
-        // 缓存未命中，从磁盘加载
+        // 缓存未命中，从磁盘加载（使用 ManifestListIO）
         logger.debug("ManifestList cache miss: snapshot {}, loading from disk", snapshotId);
-        ManifestList manifestList = ManifestList.load(pathFactory, database, table, snapshotId);
+        ManifestListIO reader = new ManifestListIO(pathFactory, database, table);
+        List<ManifestFileMeta> manifestMetas = reader.readManifestList("manifest-list-" + snapshotId);
         
         // 放入缓存
-        manifestListCache.put(snapshotId, manifestList);
+        manifestListCache.put(snapshotId, manifestMetas);
         
-        return manifestList;
+        return manifestMetas;
     }
     
     /**
-     * 获取Delta ManifestList
+     * 获取 Delta ManifestList（使用 ManifestListIO）
      */
-    public ManifestList getDeltaManifestList(PathFactory pathFactory, String database, 
+    public List<ManifestFileMeta> getDeltaManifestList(PathFactory pathFactory, String database, 
                                            String table, long snapshotId) throws IOException {
         // 使用负数来区分delta类型的缓存键
         Long cacheKey = -snapshotId;
-        ManifestList cached = manifestListCache.get(cacheKey);
+        List<ManifestFileMeta> cached = manifestListCache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
         
-        ManifestList manifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotId);
-        manifestListCache.put(cacheKey, manifestList);
-        return manifestList;
+        ManifestListIO reader = new ManifestListIO(pathFactory, database, table);
+        List<ManifestFileMeta> manifestMetas = reader.readDeltaManifestList(snapshotId);
+        manifestListCache.put(cacheKey, manifestMetas);
+        return manifestMetas;
     }
     
     /**
-     * 获取Base ManifestList
+     * 获取 Base ManifestList（使用 ManifestListIO）
      */
-    public ManifestList getBaseManifestList(PathFactory pathFactory, String database, 
+    public List<ManifestFileMeta> getBaseManifestList(PathFactory pathFactory, String database, 
                                           String table, long snapshotId) throws IOException {
         // 使用大数值偏移来区分base类型的缓存键
         Long cacheKey = snapshotId + 1000000L;
-        ManifestList cached = manifestListCache.get(cacheKey);
+        List<ManifestFileMeta> cached = manifestListCache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
         
-        ManifestList manifestList = ManifestList.loadBase(pathFactory, database, table, snapshotId);
-        manifestListCache.put(cacheKey, manifestList);
-        return manifestList;
+        ManifestListIO reader = new ManifestListIO(pathFactory, database, table);
+        List<ManifestFileMeta> manifestMetas = reader.readBaseManifestList(snapshotId);
+        manifestListCache.put(cacheKey, manifestMetas);
+        return manifestMetas;
     }
     
     /**
@@ -137,7 +144,8 @@ public class ManifestCacheManager {
         
         // 如果没有基准快照，返回全部文件
         if (baseSnapshotId == null) {
-            ManifestList targetManifestList = getDeltaManifestList(pathFactory, database, table, targetSnapshotId);
+            List<ManifestFileMeta> targetManifestMetas = getDeltaManifestList(pathFactory, database, table, targetSnapshotId);
+            ManifestList targetManifestList = new ManifestList(targetManifestMetas);
             List<ManifestEntry> allEntries = loadAllEntries(pathFactory, database, table, targetManifestList);
             return new IncrementalManifest(allEntries, Collections.emptyList());
         }
@@ -148,7 +156,8 @@ public class ManifestCacheManager {
         
         for (long snapId = baseSnapshotId + 1; snapId <= targetSnapshotId; snapId++) {
             try {
-                ManifestList deltaList = getDeltaManifestList(pathFactory, database, table, snapId);
+                List<ManifestFileMeta> deltaMetas = getDeltaManifestList(pathFactory, database, table, snapId);
+                ManifestList deltaList = new ManifestList(deltaMetas);
                 List<ManifestEntry> entries = loadAllEntries(pathFactory, database, table, deltaList);
                 
                 for (ManifestEntry entry : entries) {
@@ -200,9 +209,9 @@ public class ManifestCacheManager {
         
         for (ManifestFileMeta meta : newManifestFiles) {
             String manifestId = meta.getFileName().substring("manifest-".length());
-            ManifestFile manifestFile = getManifestFile(pathFactory, database, table, manifestId);
+            List<ManifestEntry> entries = getManifestFile(pathFactory, database, table, manifestId);
             
-            for (ManifestEntry entry : manifestFile.getEntries()) {
+            for (ManifestEntry entry : entries) {
                 if (entry.getKind() == ManifestEntry.FileKind.ADD) {
                     newEntries.add(entry);
                 } else if (entry.getKind() == ManifestEntry.FileKind.DELETE) {
@@ -227,9 +236,9 @@ public class ManifestCacheManager {
         
         for (ManifestFileMeta meta : manifestList.getManifestFiles()) {
             String manifestId = meta.getFileName().substring("manifest-".length());
-            ManifestFile manifestFile = getManifestFile(pathFactory, database, table, manifestId);
+            List<ManifestEntry> entries = getManifestFile(pathFactory, database, table, manifestId);
             
-            for (ManifestEntry entry : manifestFile.getEntries()) {
+            for (ManifestEntry entry : entries) {
                 if (entry.getKind() == ManifestEntry.FileKind.ADD) {
                     allEntries.add(entry);
                 }

@@ -116,7 +116,7 @@ public class FileStoreTable implements Table {
 
     @Override
     public TableCommit newCommit() {
-        return new TableCommit(catalog, pathFactory, identifier);
+        return new TableCommit(catalog, pathFactory, identifier, schema);
     }
 
     @Override
@@ -125,7 +125,7 @@ public class FileStoreTable implements Table {
             if (!snapshotManager.hasSnapshot()) {
                 return Optional.empty();
             }
-            return Optional.of(snapshotManager.getLatestSnapshot());
+            return Optional.of(snapshotManager.latestSnapshot());
         } catch (IOException e) {
             logger.error("Failed to get latest snapshot", e);
             return Optional.empty();
@@ -135,7 +135,7 @@ public class FileStoreTable implements Table {
     @Override
     public Optional<Snapshot> snapshot(long snapshotId) {
         try {
-            Snapshot snapshot = snapshotManager.getSnapshot(snapshotId);
+            Snapshot snapshot = snapshotManager.snapshot(snapshotId);
             return Optional.ofNullable(snapshot);
         } catch (IOException e) {
             logger.error("Failed to get snapshot {}", snapshotId, e);
@@ -145,7 +145,7 @@ public class FileStoreTable implements Table {
 
     @Override
     public List<Snapshot> snapshots() throws IOException {
-        return snapshotManager.getAllSnapshots();
+        return snapshotManager.listAllSnapshots();
     }
 
     @Override

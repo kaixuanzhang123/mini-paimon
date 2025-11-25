@@ -106,7 +106,7 @@ public class FileStoreTableScan implements TableScan {
         // 确定要扫描的快照
         Snapshot snapshot;
         if (specifiedSnapshotId != null) {
-            snapshot = snapshotManager.getSnapshot(specifiedSnapshotId);
+            snapshot = snapshotManager.snapshot(specifiedSnapshotId);
             if (snapshot == null) {
                 throw new IOException("Snapshot not found: " + specifiedSnapshotId);
             }
@@ -115,7 +115,7 @@ public class FileStoreTableScan implements TableScan {
                 // 没有快照，返回空计划
                 return new PlanImpl(null, Collections.emptyList());
             }
-            snapshot = snapshotManager.getLatestSnapshot();
+            snapshot = snapshotManager.latestSnapshot();
         } else {
             throw new IllegalStateException("No snapshot specified");
         }
@@ -183,12 +183,13 @@ public class FileStoreTableScan implements TableScan {
                     
                     if (isCompactedBase) {
                         // 如果是compacted base，直接读取base，然后读取从baseSnapshotId+1到currentSnapshotId-1的所有delta manifests
-                        ManifestList baseList = cacheManager.getBaseManifestList(
+                        List<ManifestFileMeta> baseMetas = cacheManager.getBaseManifestList(
                             table.pathFactory(),
                             table.identifier().getDatabase(),
                             table.identifier().getTable(),
                             baseSnapshotId
                         );
+                        ManifestList baseList = new ManifestList(baseMetas);
                         mergeManifestListIntoMap(baseList, fileStateMap);
                         logger.info("Loaded compacted base manifest for snapshot {} (from baseSnapshotId {}), {} files", 
                                   currentSnapshotId, baseSnapshotId, fileStateMap.size());
@@ -199,12 +200,13 @@ public class FileStoreTableScan implements TableScan {
                                         baseSnapshotId + 1, currentSnapshotId - 1);
                             for (long snapId = baseSnapshotId + 1; snapId < currentSnapshotId; snapId++) {
                                 try {
-                                    ManifestList deltaList = cacheManager.getDeltaManifestList(
+                                    List<ManifestFileMeta> deltaMetas = cacheManager.getDeltaManifestList(
                                         table.pathFactory(),
                                         table.identifier().getDatabase(),
                                         table.identifier().getTable(),
                                         snapId
                                     );
+                                    ManifestList deltaList = new ManifestList(deltaMetas);
                                     mergeManifestListIntoMap(deltaList, fileStateMap);
                                     logger.debug("Merged delta manifest from snapshot {}, {} files now", 
                                                snapId, fileStateMap.size());
@@ -222,12 +224,13 @@ public class FileStoreTableScan implements TableScan {
                                     baseSnapshotId, currentSnapshotId - 1);
                         for (long snapId = baseSnapshotId; snapId < currentSnapshotId; snapId++) {
                             try {
-                                ManifestList deltaList = cacheManager.getDeltaManifestList(
+                                List<ManifestFileMeta> deltaMetas = cacheManager.getDeltaManifestList(
                                     table.pathFactory(),
                                     table.identifier().getDatabase(),
                                     table.identifier().getTable(),
                                     snapId
                                 );
+                                ManifestList deltaList = new ManifestList(deltaMetas);
                                 mergeManifestListIntoMap(deltaList, fileStateMap);
                                 logger.debug("Merged delta manifest from snapshot {}, {} files now", 
                                            snapId, fileStateMap.size());
@@ -255,12 +258,13 @@ public class FileStoreTableScan implements TableScan {
         if (deltaManifestListName != null && !deltaManifestListName.isEmpty()) {
             long deltaSnapshotId = currentSnapshotId;
             try {
-                ManifestList deltaList = cacheManager.getDeltaManifestList(
+                List<ManifestFileMeta> deltaMetas = cacheManager.getDeltaManifestList(
                     table.pathFactory(),
                     table.identifier().getDatabase(),
                     table.identifier().getTable(),
                     deltaSnapshotId
                 );
+                ManifestList deltaList = new ManifestList(deltaMetas);
                 mergeManifestListIntoMap(deltaList, fileStateMap);
                 logger.info("Merged delta manifest for snapshot {}, {} files now", 
                            deltaSnapshotId, fileStateMap.size());
@@ -290,14 +294,14 @@ public class FileStoreTableScan implements TableScan {
             }
             
             try {
-                ManifestFile manifestFile = cacheManager.getManifestFile(
+                List<ManifestEntry> entries = cacheManager.getManifestFile(
                     table.pathFactory(),
                     table.identifier().getDatabase(),
                     table.identifier().getTable(),
                     manifestId
                 );
                 
-                for (ManifestEntry entry : manifestFile.getEntries()) {
+                for (ManifestEntry entry : entries) {
                     String fileName = entry.getFile().getFileName();
                     if (entry.getKind() == ManifestEntry.FileKind.ADD) {
                         fileStateMap.put(fileName, entry);

@@ -1,0 +1,4 @@
+# 以下是重构前的旧测试，使用了已被移除的API
+# 需要后续更新以适配新的API
+SnapshotTest
+IncrementalManifestTest

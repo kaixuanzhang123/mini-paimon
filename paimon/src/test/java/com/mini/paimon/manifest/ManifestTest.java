@@ -1,5 +1,7 @@
 package com.mini.paimon.manifest;
 
+import com.mini.paimon.io.ManifestFileIO;
+import com.mini.paimon.io.ManifestListIO;
 import com.mini.paimon.schema.RowKey;
 import com.mini.paimon.utils.PathFactory;
 import org.junit.jupiter.api.AfterEach;
@@ -13,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -114,15 +117,18 @@ class ManifestTest {
         assertFalse(manifestFile.isEmpty());
         assertEquals(2, manifestFile.getEntries().size());
         
-        // 持久化
-        manifestFile.persist(pathFactory, "test_db", "test_table", "abc123");
+        // 持久化（使用 ManifestFileIO）
+        ManifestFileIO manifestFileWriter = new ManifestFileIO(pathFactory, "test_db", "test_table");
+        manifestFileWriter.writeManifest(manifestFile.getEntries(), "abc123");
         
         // 验证文件已创建
         Path manifestPath = pathFactory.getManifestPath("test_db", "test_table", "abc123");
         assertTrue(Files.exists(manifestPath));
         
-        // 重新加载
-        ManifestFile loadedManifest = ManifestFile.load(pathFactory, "test_db", "test_table", "abc123");
+        // 重新加载（使用 ManifestFileIO）
+        ManifestFileIO manifestFileReader = new ManifestFileIO(pathFactory, "test_db", "test_table");
+        List<ManifestEntry> loadedEntries = manifestFileReader.readManifestById("abc123");
+        ManifestFile loadedManifest = new ManifestFile(loadedEntries);
         
         assertNotNull(loadedManifest);
         assertEquals(manifestFile, loadedManifest);
@@ -142,15 +148,18 @@ class ManifestTest {
         assertFalse(manifestList.isEmpty());
         assertEquals(2, manifestList.getManifestFiles().size());
         
-        // 持久化
-        manifestList.persist(pathFactory, "test_db", "test_table", 1);
+        // 持久化（使用 ManifestListIO）
+        ManifestListIO manifestListWriter = new ManifestListIO(pathFactory, "test_db", "test_table");
+        manifestListWriter.write(manifestList.getManifestFiles(), "manifest-list-1");
         
         // 验证文件已创建
         Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 1);
         assertTrue(Files.exists(manifestListPath));
         
-        // 重新加载
-        ManifestList loadedManifestList = ManifestList.load(pathFactory, "test_db", "test_table", 1);
+        // 重新加载（使用 ManifestListIO）
+        ManifestListIO manifestListReader = new ManifestListIO(pathFactory, "test_db", "test_table");
+        List<ManifestFileMeta> loadedMetas = manifestListReader.readManifestList("manifest-list-1");
+        ManifestList loadedManifestList = new ManifestList(loadedMetas);
         
         assertNotNull(loadedManifestList);
         assertEquals(manifestList, loadedManifestList);
@@ -159,7 +168,8 @@ class ManifestTest {
 
     @Test
     void testManifestFileExists() {
-        assertFalse(ManifestFile.exists(pathFactory, "test_db", "test_table", "nonexistent"));
+        Path manifestPath = pathFactory.getManifestPath("test_db", "test_table", "nonexistent");
+        assertFalse(Files.exists(manifestPath));
         
         // 创建一个 Manifest 文件来测试
         DataFileMeta fileMeta = new DataFileMeta(
@@ -180,16 +190,18 @@ class ManifestTest {
         );
         
         ManifestFile manifestFile = new ManifestFile(Collections.singletonList(entry));
-        assertFalse(ManifestFile.exists(pathFactory, "test_db", "test_table", "test"));
+        Path testPath = pathFactory.getManifestPath("test_db", "test_table", "test");
+        assertFalse(Files.exists(testPath));
     }
 
     @Test
     void testManifestListExists() {
-        assertFalse(ManifestList.exists(pathFactory, "test_db", "test_table", 999));
+        Path manifestListPath = pathFactory.getManifestListPath("test_db", "test_table", 999);
+        assertFalse(Files.exists(manifestListPath));
         
         // 创建一个 Manifest List 来测试
         ManifestList manifestList = new ManifestList();
-        assertFalse(ManifestList.exists(pathFactory, "test_db", "test_table", 999));
+        assertFalse(Files.exists(manifestListPath));
     }
 
     /**

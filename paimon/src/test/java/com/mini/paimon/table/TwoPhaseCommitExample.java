@@ -82,7 +82,7 @@ public class TwoPhaseCommitExample {
             }
             
             System.out.println("\n3. Commit 阶段：通过 Snapshot 使数据可见");
-            TableCommit tableCommit = new TableCommit(catalog, pathFactory, tableId);
+            TableCommit tableCommit = new TableCommit(catalog, pathFactory, tableId, schema);
             tableCommit.commit(message);
             System.out.println("   - 创建 Manifest 文件，记录数据文件变更");
             System.out.println("   - 创建 Snapshot，引用 Manifest");
@@ -92,8 +92,10 @@ public class TwoPhaseCommitExample {
             tableWrite.markCommitted();
             
             System.out.println("\n4. 验证提交结果");
-            if (Snapshot.hasLatestSnapshot(pathFactory, "test_db", "users")) {
-                Snapshot snapshot = Snapshot.loadLatest(pathFactory, "test_db", "users");
+            com.mini.paimon.snapshot.SnapshotManager snapshotManager = 
+                new com.mini.paimon.snapshot.SnapshotManager(pathFactory, "test_db", "users");
+            if (snapshotManager.hasSnapshot()) {
+                Snapshot snapshot = snapshotManager.latestSnapshot();
                 System.out.println("   - Snapshot ID: " + snapshot.getId());
                 System.out.println("   - 提交类型: " + snapshot.getCommitKind());
                 System.out.println("   - Schema ID: " + snapshot.getSchemaId());

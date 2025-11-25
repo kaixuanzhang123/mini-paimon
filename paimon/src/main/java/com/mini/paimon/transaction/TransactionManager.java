@@ -19,15 +19,12 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * 事务管理器
- * 参考 Apache Paimon 的 MVCC 设计
- * 
  * 核心功能：
  * 1. 事务生命周期管理
  * 2. MVCC 多版本并发控制
  * 3. 事务冲突检测（乐观锁和悲观锁）
  * 4. 隔离级别控制
  * 5. 死锁检测和预防
- * 
  * MVCC 实现原理：
  * - 每个事务读取特定版本的快照
  * - 写操作不会覆盖原数据，而是创建新版本
@@ -137,7 +134,7 @@ public class TransactionManager {
             
             long readSnapshotId;
             if (snapshotManager.hasSnapshot()) {
-                Snapshot latestSnapshot = snapshotManager.getLatestSnapshot();
+                Snapshot latestSnapshot = snapshotManager.latestSnapshot();
                 readSnapshotId = latestSnapshot.getId();
             } else {
                 readSnapshotId = 0; // 空表

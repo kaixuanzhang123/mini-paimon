@@ -2,6 +2,8 @@ package com.mini.paimon.table;
 
 import com.mini.paimon.index.IndexFileManager;
 import com.mini.paimon.index.IndexSelector;
+import com.mini.paimon.io.ManifestFileIO;
+import com.mini.paimon.io.ManifestListIO;
 import com.mini.paimon.manifest.ManifestEntry;
 import com.mini.paimon.manifest.ManifestFile;
 import com.mini.paimon.manifest.ManifestFileMeta;
@@ -33,6 +35,10 @@ public class DataTableScan {
     private final Schema schema;
     private final IndexFileManager indexFileManager;
     
+    // 新增：使用专门的 I/O 类
+    private final ManifestFileIO manifestFileReader;
+    private final ManifestListIO manifestListReader;
+    
     private Long snapshotId;
     private Predicate predicate;
     
@@ -43,6 +49,10 @@ public class DataTableScan {
         this.schema = schema;
         this.snapshotManager = new SnapshotManager(pathFactory, database, table);
         this.indexFileManager = new IndexFileManager(pathFactory);
+        
+        // 初始化 I/O 类
+        this.manifestFileReader = new ManifestFileIO(pathFactory, database, table);
+        this.manifestListReader = new ManifestListIO(pathFactory, database, table);
     }
     
     /**
@@ -68,14 +78,14 @@ public class DataTableScan {
         // 1. 确定要读取的快照
         Snapshot snapshot;
         if (snapshotId != null) {
-            snapshot = snapshotManager.getSnapshot(snapshotId);
+            snapshot = snapshotManager.snapshot(snapshotId);
         } else {
             // 使用最新快照
             if (!snapshotManager.hasSnapshot()) {
                 // 表为空，返回空计划
                 return new Plan(null, new ArrayList<>());
             }
-            snapshot = snapshotManager.getLatestSnapshot();
+            snapshot = snapshotManager.latestSnapshot();
         }
         
         logger.debug("Scanning snapshot {} for table {}/{}", 
@@ -98,24 +108,24 @@ public class DataTableScan {
             logger.debug("Loading base manifest list: {} with snapshot ID: {}", 
                         baseManifestListName, baseSnapshotId);
             
-            ManifestList baseManifestList;
+            List<ManifestFileMeta> baseManifestMetas;
             if (baseManifestListName.startsWith("manifest-list-base-")) {
-                baseManifestList = ManifestList.loadBase(pathFactory, database, table, baseSnapshotId);
+                baseManifestMetas = manifestListReader.readBaseManifestList(baseSnapshotId);
             } else if (baseManifestListName.startsWith("manifest-list-delta-")) {
                 // 如果base指向delta文件（首次提交的情况）
-                baseManifestList = ManifestList.loadDelta(pathFactory, database, table, baseSnapshotId);
+                baseManifestMetas = manifestListReader.readDeltaManifestList(baseSnapshotId);
             } else {
                 // 兼容旧格式
-                baseManifestList = ManifestList.load(pathFactory, database, table, baseSnapshotId);
+                baseManifestMetas = manifestListReader.readManifestList(baseManifestListName);
             }
             
             // 读取 base manifest 中的数据文件
-            for (ManifestFileMeta manifestFileMeta : baseManifestList.getManifestFiles()) {
+            for (ManifestFileMeta manifestFileMeta : baseManifestMetas) {
                 String manifestFileName = manifestFileMeta.getFileName();
                 String manifestId = manifestFileName.substring("manifest-".length());
-                ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
+                List<ManifestEntry> entries = manifestFileReader.readManifestById(manifestId);
                 
-                for (ManifestEntry entry : manifest.getEntries()) {
+                for (ManifestEntry entry : entries) {
                     if (entry.getKind() == ManifestEntry.FileKind.ADD) {
                         dataFileMetas.add(entry.getFile());
                     }
@@ -127,15 +137,15 @@ public class DataTableScan {
         String deltaManifestListName = snapshot.getDeltaManifestList();
         if (deltaManifestListName != null && !deltaManifestListName.isEmpty() 
             && !deltaManifestListName.equals(baseManifestListName)) {
-            ManifestList deltaManifestList = ManifestList.loadDelta(pathFactory, database, table, snapshotIdValue);
+            List<ManifestFileMeta> deltaManifestMetas = manifestListReader.readDeltaManifestList(snapshotIdValue);
             
             // 读取 delta manifest 中的数据文件
-            for (ManifestFileMeta manifestFileMeta : deltaManifestList.getManifestFiles()) {
+            for (ManifestFileMeta manifestFileMeta : deltaManifestMetas) {
                 String manifestFileName = manifestFileMeta.getFileName();
                 String manifestId = manifestFileName.substring("manifest-".length());
-                ManifestFile manifest = ManifestFile.load(pathFactory, database, table, manifestId);
+                List<ManifestEntry> entries = manifestFileReader.readManifestById(manifestId);
                 
-                for (ManifestEntry entry : manifest.getEntries()) {
+                for (ManifestEntry entry : entries) {
                     if (entry.getKind() == ManifestEntry.FileKind.ADD) {
                         dataFileMetas.add(entry.getFile());
                     }
